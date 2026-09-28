@@ -65,6 +65,7 @@ export interface ClientSettings {
   ramMb: number;
   javaPath: string;
   proxy: string;
+  secureDns: string;
   theme: string;
   resolution: { w: number; h: number };
   showHud: boolean;
@@ -199,11 +200,12 @@ const gooner = {
   getSettings: (): Promise<ClientSettings> =>
     ipcRenderer
       .invoke('launcher:settings:get')
-      .then((s: { theme: string; maxRamMb: number; javaPath: string | null; closeOnLaunch?: boolean; proxy?: string | null }) => ({
+      .then((s: { theme: string; maxRamMb: number; javaPath: string | null; closeOnLaunch?: boolean; proxy?: string | null; secureDns?: string }) => ({
         theme: s.theme === 'gooner' ? 'dark' : s.theme,
         ramMb: s.maxRamMb,
         javaPath: s.javaPath ?? '',
         proxy: s.proxy ?? '',
+        secureDns: s.secureDns === 'cloudflare' || s.secureDns === 'google' ? s.secureDns : 'off',
         resolution: { w: 1280, h: 720 },
         showHud: true,
         closeOnLaunch: Boolean(s.closeOnLaunch ?? false),
@@ -217,6 +219,7 @@ const gooner = {
         javaPath: s.javaPath,
         closeOnLaunch: s.closeOnLaunch,
         proxy: (s as { proxy?: string }).proxy ?? '',
+        secureDns: (s as { secureDns?: string }).secureDns ?? 'off',
       })
       .then(() => undefined),
   browseJava: (): Promise<string | null> => ipcRenderer.invoke('gooner:pick-directory'),

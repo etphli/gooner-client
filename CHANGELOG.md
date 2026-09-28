@@ -3,6 +3,12 @@ All notable changes documented. Format based on Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-09-28
+### Fixed
+- Update check no longer crashes ("object could not be cloned").
+### Added
+- Secure DNS (Cloudflare/Google) in Settings → Network: bypasses broken local DNS without a VPN.
+
 ## [0.3.2] - 2026-09-28
 ### Added
 - Quit-time update check (offers install on quit) + top-right update dot.

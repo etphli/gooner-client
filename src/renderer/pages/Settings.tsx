@@ -16,7 +16,7 @@ interface ExtGooner {
 }
 
 const Settings: React.FC<{ theme: Theme; setTheme: (t: Theme) => void }> = ({ theme, setTheme }) => {
-  const [s, setS] = useState<ClientSettings>({ ramMb: 4096, javaPath: '', proxy: '', theme: 'system', resolution: { w: 1280, h: 720 }, showHud: true, closeOnLaunch: true, fov: 90 });
+  const [s, setS] = useState<ClientSettings>({ ramMb: 4096, javaPath: '', proxy: '', secureDns: 'off', theme: 'system', resolution: { w: 1280, h: 720 }, showHud: true, closeOnLaunch: true, fov: 90 });
 
   const [upStatus, setUpStatus] = useState<UpdaterStatus>('idle');
   const [upInfo, setUpInfo] = useState('Up to date check has not run yet.');
@@ -156,6 +156,13 @@ const Settings: React.FC<{ theme: Theme; setTheme: (t: Theme) => void }> = ({ th
           <div className="row">
             <input className="input mono" value={s.proxy} onChange={(e) => setS({ ...s, proxy: e.target.value })} onBlur={() => save(s)} placeholder="http://proxy.local:8080" aria-label="Network proxy" />
           </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <span className="tiny muted">Secure DNS:</span>
+            {(['off', 'cloudflare', 'google'] as const).map((m) => (
+              <button key={m} type="button" className="btn-ghost btn-sm" style={{ textTransform: 'capitalize', background: s.secureDns === m ? 'var(--text)' : undefined, color: s.secureDns === m ? 'var(--bg)' : undefined }} onClick={() => save({ ...s, secureDns: m })}>{m === 'off' ? 'Off' : m === 'cloudflare' ? 'Cloudflare' : 'Google'}</button>
+            ))}
+          </div>
+          <div className="tiny muted" style={{ marginTop: 4 }}>Bypasses broken local DNS for sign-in/downloads (no VPN needed).</div>
         </Field>
       </Card>
       <div style={{ height: 10 }} />

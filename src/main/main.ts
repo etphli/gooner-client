@@ -340,7 +340,19 @@ function registerIpc(): void {
 
   ipcMain.handle('updater:check', async () => {
     if (isDev) return { skipped: true };
-    return autoUpdater.checkForUpdates();
+    // checkForUpdates() returns objects (cancellation tokens, etc.) that
+    // structured-clone cannot cross IPC ("An object could not be cloned"),
+    // so project to plain JSON before returning.
+    const res = await autoUpdater.checkForUpdates();
+    const info = res?.updateInfo as
+      | { version?: unknown; releaseDate?: unknown; releaseName?: unknown; releaseNotes?: unknown }
+      | undefined;
+    return {
+      version: typeof info?.version === 'string' ? info.version : null,
+      releaseDate: typeof info?.releaseDate === 'string' ? info.releaseDate : null,
+      releaseName: typeof info?.releaseName === 'string' ? info.releaseName : null,
+      hasNotes: info?.releaseNotes !== undefined && info?.releaseNotes !== null,
+    };
   });
   ipcMain.handle('updater:quit-and-install', () => autoUpdater.quitAndInstall(false, true));
 }

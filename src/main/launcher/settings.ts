@@ -30,6 +30,8 @@ export interface GoonerSettings {
   msClientId: string | null;
   /** Manual HTTP proxy URL (http://host:port) or null = OS proxy / direct. */
   proxy: string | null;
+  /** Secure DNS mode for broken local resolvers. */
+  secureDns: 'off' | 'cloudflare' | 'google';
 }
 
 export function getDefaultDataDir(): string {
@@ -64,6 +66,7 @@ export function defaultSettings(): GoonerSettings {
     activeAccountId: null,
     msClientId: null,
     proxy: null,
+    secureDns: 'off',
   };
 }
 
@@ -87,6 +90,9 @@ function sanitize(input: Partial<GoonerSettings>, base: GoonerSettings): GoonerS
   const rawMs = input.msClientId ?? base.msClientId;
   const msClientId =
     typeof rawMs === 'string' && /^[0-9a-f-]{8,64}$/i.test(rawMs.trim()) ? rawMs.trim() : null;
+  const rawDns = input.secureDns ?? base.secureDns;
+  const secureDns: 'off' | 'cloudflare' | 'google' =
+    rawDns === 'cloudflare' || rawDns === 'google' ? rawDns : 'off';
   const rawProxy = input.proxy ?? base.proxy;
   let proxy: string | null = null;
   if (typeof rawProxy === 'string' && rawProxy.trim().length > 0) {
@@ -114,6 +120,7 @@ function sanitize(input: Partial<GoonerSettings>, base: GoonerSettings): GoonerS
     activeAccountId,
     msClientId,
     proxy,
+    secureDns,
   };
 }
 

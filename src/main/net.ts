@@ -171,7 +171,9 @@ export async function fetchWithRetry(url: string, init: RequestInit = {}, opts: 
   const { timeoutMs = 20000, retries = 0, label, signal: userSignal } = opts;
   const tag = label ?? hostOf(url);
   let last: unknown = null;
-  const dispatcher = await dispatcherFor(url);
+  // Proxy wins when configured (DNS happens at the proxy); otherwise secure
+  // DNS if enabled; otherwise direct.
+  const dispatcher = (await dispatcherFor(url)) ?? (await secureDnsDispatcher(url).catch(() => undefined));
   for (let attempt = 0; ; attempt++) {
     if (userSignal?.aborted) throw new AuthError('ABORTED', `${tag}: cancelled.`);
     const { signal, cancel } = combineSignals(userSignal, timeoutMs);
@@ -220,6 +222,157 @@ export async function fetchJson<T>(url: string, init: RequestInit = {}, opts: Fe
     throw err;
   }
   return { status: res.status, json };
+}
+
+// ---- secure DNS (DNS-over-HTTPS) ----
+
+export type SecureDnsMode = 'off' | 'cloudflare' | 'google';
+
+const DOH_URLS: Record<Exclude<SecureDnsMode, 'off'>, string> = {
+  // IP literals: no system DNS needed to bootstrap.
+  cloudflare: 'https://1.1.1.1/dns-query',
+  google: 'https://8.8.8.8/resolve',
+};
+
+const dohCache = new Map<string, { at: number; ip: string }>();
+const DOH_TTL_MS = 5 * 60_000;
+let secureDnsCache: { at: number; mode: SecureDnsMode } | null = null;
+
+async function readSecureDnsMode(): Promise<SecureDnsMode> {
+  if (secureDnsCache && Date.now() - secureDnsCache.at < 60_000) return secureDnsCache.mode;
+  // Env override for debugging (GOONER_SECURE_DNS=cloudflare|google|off).
+  const env = (typeof process !== 'undefined' ? process.env.GOONER_SECURE_DNS : '') ?? '';
+  if (env === 'cloudflare' || env === 'google' || env === 'off') {
+    secureDnsCache = { at: Date.now(), mode: env };
+    return env;
+  }
+  let mode: SecureDnsMode = 'off';
+  try {
+    const { loadSettings } = await import('./launcher/settings.js');
+    const s = await loadSettings();
+    const m = (s as { secureDns?: string }).secureDns;
+    if (m === 'cloudflare' || m === 'google' || m === 'off') mode = m;
+  } catch {
+    /* default off */
+  }
+  secureDnsCache = { at: Date.now(), mode };
+  return mode;
+}
+
+function isIpLiteral(host: string): boolean {
+  return /^\d+\.\d+\.\d+\.\d+$/.test(host) || host.includes(':');
+}
+
+function isLocalHost(host: string): boolean {
+  const h = host.toLowerCase();
+  return (
+    h === 'localhost' ||
+    h === '127.0.0.1' ||
+    h === '::1' ||
+    h === '[::1]' ||
+    h.endsWith('.local') ||
+    h.endsWith('.invalid') ||
+    h.endsWith('.localhost')
+  );
+}
+
+interface DohJson {
+  Answer?: Array<{ type?: number; data?: string }>;
+}
+
+/** Resolve an A record over HTTPS (no system DNS involved). */
+async function dohResolve(host: string, dohUrl: string): Promise<string> {
+  const cached = dohCache.get(`${dohUrl}|${host}`);
+  if (cached && Date.now() - cached.at < DOH_TTL_MS) return cached.ip;
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(new Error('doh timeout')), 8000);
+  try {
+    const res = await fetch(`${dohUrl}?name=${encodeURIComponent(host)}&type=A`, {
+      headers: { accept: 'application/dns-json' },
+      signal: ctl.signal,
+    });
+    if (!res.ok) throw new Error(`DoH HTTP ${res.status}`);
+    const json = (await res.json()) as DohJson;
+    const a = (json.Answer ?? []).find((r) => r?.type === 1 && typeof r?.data === 'string');
+    if (!a?.data) throw new Error('no A record');
+    dohCache.set(`${dohUrl}|${host}`, { at: Date.now(), ip: a.data });
+    return a.data;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+type ConnectFn = (
+  opts: { hostname?: string; host?: string; port?: number; protocol?: string },
+  cb: (err: Error | null, socket: unknown) => void,
+) => void;
+
+let dohAgentCtor: (new (opts: { connect: ConnectFn }) => DispatcherLike) | null | undefined;
+
+/**
+ * undici dispatcher that resolves hostnames over HTTPS-DNS and dials the
+ * raw IP itself. TLS/SNI still uses the original hostname, so certificates
+ * verify normally — only the DNS step bypasses broken local resolvers.
+ */
+async function secureDnsDispatcher(url: string): Promise<DispatcherLike | undefined> {
+  let host = '';
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return undefined;
+  }
+  if (isIpLiteral(host) || isLocalHost(host)) return undefined;
+  const mode = await readSecureDnsMode();
+  if (mode === 'off') return undefined;
+  if (dohAgentCtor === undefined) {
+    try {
+      const mod = (await import('undici')) as { Agent?: new (opts: { connect: ConnectFn }) => DispatcherLike };
+      dohAgentCtor = mod.Agent ?? null;
+    } catch {
+      dohAgentCtor = null;
+    }
+  }
+  const AgentCtor = dohAgentCtor;
+  if (!AgentCtor) return undefined;
+  const primaries: string[] =
+    mode === 'cloudflare' ? [DOH_URLS.cloudflare, DOH_URLS.google] : [DOH_URLS.google, DOH_URLS.cloudflare];
+  const connect: ConnectFn = (opts, cb) => {
+    void (async () => {
+      try {
+        const hostname = opts.hostname || opts.host || host;
+        const port = opts.port || (opts.protocol === 'http:' ? 80 : 443);
+        let ip: string | null = null;
+        let lastErr: unknown = null;
+        for (const doh of primaries) {
+          try {
+            ip = await dohResolve(hostname, doh);
+            break;
+          } catch (e) {
+            lastErr = e;
+          }
+        }
+        if (!ip) throw lastErr instanceof Error ? lastErr : new Error('secure DNS failed');
+        const net = await import('node:net');
+        const socket = net.connect({ host: ip, port });
+        const onError = (err: Error): void => {
+          try {
+            socket.destroy();
+          } catch {
+            /* ignore */
+          }
+          cb(err, null);
+        };
+        socket.once('error', onError);
+        socket.once('connect', () => {
+          socket.removeListener('error', onError);
+          cb(null, socket);
+        });
+      } catch (e) {
+        cb(e instanceof Error ? e : new Error(String(e)), null);
+      }
+    })();
+  };
+  return new AgentCtor({ connect });
 }
 
 export interface EndpointCheck {
