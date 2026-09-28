@@ -13,9 +13,13 @@
 
 **The latest release is always at the link above.** Open it, scroll to **Assets**, and download:
 
-- `Gooner-Client-<version>-mac-arm64.dmg` — Apple Silicon (M1/M2/M3/M4) — **latest + recommended**
-- `Gooner-Client-<version>-mac-x64.dmg` — Intel Mac
+**Default: Apple Silicon (M1/M2/M3/M4) — download the `arm64` DMG.** Nearly all Macs sold since late 2020 are M-chip Macs, so `arm64` is the right pick unless you know you have Intel.
+
+- `Gooner-Client-<version>-mac-arm64.dmg` — Apple Silicon (M1/M2/M3/M4) — **default, download this one**
+- `Gooner-Client-<version>-mac-x64.dmg` — Intel Macs only
 - `SHA256SUMS.txt` — verify before opening (see below)
+
+Not sure which Mac you have? Click the Apple menu → **About This Mac** → look at **Chip**: `Apple M1/M2/M3/M4` = arm64, `Intel` = x64.
 
 > Do NOT download `Source code (zip/tar.gz)` unless you want to build yourself. Pre-releases like `v0.2.0-beta.1` are marked **Pre-release** and may be unstable.
 
