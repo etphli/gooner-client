@@ -111,9 +111,23 @@ function registerIpc(): void {
     await saveAccount(acc);
     return acc;
   });
+  const getMsClientId = async (): Promise<string> => {
+    const { loadSettings } = await import('./launcher/settings.js');
+    const { DEFAULT_MS_CLIENT_ID } = await import('./auth/types.js');
+    const s = await loadSettings();
+    return (s as { msClientId?: string | null }).msClientId ?? DEFAULT_MS_CLIENT_ID;
+  };
+  ipcMain.handle('auth:ms-client-id:get', async () => getMsClientId());
+  ipcMain.handle('auth:ms-client-id:set', async (_e, id?: string) => {
+    const { saveSettings } = await import('./launcher/settings.js');
+    const { DEFAULT_MS_CLIENT_ID } = await import('./auth/types.js');
+    const clean = typeof id === 'string' && id.trim().length > 0 ? id.trim() : null;
+    await saveSettings({ msClientId: clean });
+    return clean ?? DEFAULT_MS_CLIENT_ID;
+  });
   ipcMain.handle('auth:device:start', async () => {
     const { requestDeviceCode } = await import('./auth/deviceCode.js');
-    const info = await requestDeviceCode();
+    const info = await requestDeviceCode(await getMsClientId());
     deviceAborts.set(info.deviceCode, new AbortController());
     return { userCode: info.userCode, verificationUri: info.verificationUri, verificationUriComplete: info.verificationUriComplete, expiresIn: info.expiresIn, sessionId: info.deviceCode };
   });
@@ -132,7 +146,7 @@ function registerIpc(): void {
       const { saveAccount } = await import('./auth/store.js');
       const { addUuidDashes } = await import('./auth/types.js');
       const { randomUUID } = await import('node:crypto');
-      const microsoft = await pollDeviceCodeForToken({ userCode: '', deviceCode, verificationUri: 'https://www.microsoft.com/link', expiresIn, interval }, { signal: ctl.signal });
+      const microsoft = await pollDeviceCodeForToken({ userCode: '', deviceCode, verificationUri: 'https://www.microsoft.com/link', expiresIn, interval }, { clientId: await getMsClientId(), signal: ctl.signal });
       const chain = await microsoftToMinecraft(microsoft.accessToken, { signal: ctl.signal });
       const now = Date.now();
       const account = { id: randomUUID(), provider: 'microsoft-device' as const, minecraftUsername: chain.profile.name, minecraftUuid: addUuidDashes(chain.profile.id), microsoft, xbox: { xblToken: chain.xblToken, xblUserHash: chain.xblUserHash, xstsToken: chain.xstsToken, xstsUserHash: chain.xstsUserHash }, minecraft: { accessToken: chain.mcAccessToken, expiresAt: chain.mcExpiresAt, ownsMinecraft: chain.ownsMinecraft }, profile: chain.profile, ownsMinecraft: chain.ownsMinecraft, createdAt: now, updatedAt: now };
@@ -141,13 +155,6 @@ function registerIpc(): void {
     } finally {
       deviceAborts.delete(deviceCode);
     }
-  });
-  ipcMain.handle('auth:browser', async () => {
-    const { signInWithBrowser } = await import('./auth/browser.js');
-    const { saveAccount } = await import('./auth/store.js');
-    const { account } = await signInWithBrowser();
-    await saveAccount(account);
-    return account;
   });
   ipcMain.handle('auth:elyby', async (_e, u: string, p: string) => {
     const { signInWithElyBy } = await import('./auth/elyby.js');

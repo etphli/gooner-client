@@ -133,7 +133,8 @@ const gooner = {
   pollDeviceFlow: (deviceCode: string): Promise<unknown> => ipcRenderer.invoke('auth:device:poll', deviceCode),
   cancelDeviceFlow: (deviceCode?: string): Promise<void> =>
     ipcRenderer.invoke('auth:device:cancel', deviceCode).then(() => undefined),
-  signInBrowser: (): Promise<unknown> => ipcRenderer.invoke('auth:browser'),
+  getMsClientId: (): Promise<string> => ipcRenderer.invoke('auth:ms-client-id:get'),
+  setMsClientId: (id: string): Promise<string> => ipcRenderer.invoke('auth:ms-client-id:set', id),
   signInElyby: (username: string, password: string): Promise<unknown> =>
     ipcRenderer.invoke('auth:elyby', username, password),
   signInCustom: (server: string, username: string, password: string): Promise<unknown> =>

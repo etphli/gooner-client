@@ -9,6 +9,8 @@ interface ExtGooner {
   checkForUpdates?: () => Promise<unknown>;
   quitAndInstall?: () => Promise<unknown> | unknown;
   onUpdater?: (event: string, cb: (payload?: unknown) => void) => (() => void) | void;
+  getMsClientId?: () => Promise<string>;
+  setMsClientId?: (id: string) => Promise<string>;
 }
 
 const Settings: React.FC<{ theme: Theme; setTheme: (t: Theme) => void }> = ({ theme, setTheme }) => {
@@ -18,6 +20,14 @@ const Settings: React.FC<{ theme: Theme; setTheme: (t: Theme) => void }> = ({ th
   const [upInfo, setUpInfo] = useState('Up to date check has not run yet.');
   const [upPct, setUpPct] = useState(0);
   const [upBusy, setUpBusy] = useState(false);
+  const [msId, setMsId] = useState('');
+  const [msSaved, setMsSaved] = useState('');
+
+  useEffect(() => {
+    (window.gooner as unknown as ExtGooner | undefined)?.getMsClientId?.()
+      ?.then((v) => { if (typeof v === 'string') { setMsId(v); setMsSaved(v); } })
+      ?.catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     window.gooner?.getSettings?.()?.then((v) => {
@@ -122,6 +132,21 @@ const Settings: React.FC<{ theme: Theme; setTheme: (t: Theme) => void }> = ({ th
             <input className="input mono" value={s.javaPath} onChange={(e) => setS({ ...s, javaPath: e.target.value })} onBlur={() => save(s)} placeholder="Auto-provision Temurin 17/21" aria-label="Java path" />
             <button type="button" className="btn-ghost" onClick={async () => { const p = await window.gooner?.browseJava?.()?.catch(() => null); if (p) save({ ...s, javaPath: p }); }}>Browse…</button>
           </div>
+        </Field>
+      </Card>
+      <div style={{ height: 10 }} />
+      <Card>
+        <Field label="Microsoft Client ID (advanced)" hint="App ID used for Microsoft sign-in. Empty = built-in default. Only change if you registered your own Azure app.">
+          <div className="row">
+            <input className="input mono" value={msId} onChange={(e) => setMsId(e.target.value)} placeholder="c36a9fb6-…" aria-label="Microsoft client ID" />
+            <button type="button" className="btn-ghost" onClick={async () => {
+              try {
+                const v = await (window.gooner as unknown as ExtGooner | undefined)?.setMsClientId?.(msId.trim());
+                if (typeof v === 'string') { setMsId(v); setMsSaved(v); }
+              } catch { /* keep local value */ }
+            }}>Save</button>
+          </div>
+          {msId !== msSaved && <div className="tiny muted" style={{ marginTop: 6 }}>Unsaved changes.</div>}
         </Field>
       </Card>
       <div style={{ height: 10 }} />

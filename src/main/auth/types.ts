@@ -16,7 +16,11 @@ export const MS_TOKEN_URL =
 export const MS_AUTHORIZE_URL =
   'https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize';
 
-export const DEFAULT_MS_CLIENT_ID = '00000000402b5328';
+// Public client ID approved for the Minecraft Xbox flow (same one Prism
+// Launcher uses). The legacy Live SDK id no longer works on the v2.0
+// device-code endpoint (AADSTS700016), so this must be a GUID-format app id.
+// Users can override it in Settings with their own Azure app registration.
+export const DEFAULT_MS_CLIENT_ID = 'c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb';
 export const DEFAULT_MS_SCOPES = ['XboxLive.signin', 'offline_access', 'openid', 'profile'] as const;
 
 export const XBOX_USER_AUTH_URL = 'https://user.auth.xboxlive.com/user/authenticate';

@@ -68,17 +68,20 @@ shasum -a 256 -c SHA256SUMS.txt
 # expect: Gooner-Client-*.dmg: OK
 ```
 
-## Sign in — 5 ways (keep whichever you like)
+## Sign in — 4 ways
 
-Tokens live in OS keychain / app storage, passwords are never stored.
+Tokens live in app storage, passwords are never stored. Each method explains itself in the app after you tap it.
 
-1. **Microsoft Device Link (another device) — RECOMMENDED** — `Accounts → Device Link` shows `microsoft.com/link` + 8-char code + countdown. Enter the code on your phone/PC, launcher polls and completes Xbox → Minecraft chain automatically.
-2. **Microsoft Browser** — `Accounts → Browser` opens system browser OAuth (PKCE + localhost callback), same Xbox → Minecraft chain.
-3. **Offline** — `Accounts → Offline`, pick `Steve_2009`-style username. UUIDv3 `OfflinePlayer:`. Singleplayer + `online-mode=false` servers only.
-4. **Ely.by** — `Accounts → Ely.by`, email + password vs `authserver.ely.by`. Skins/capes on Ely servers via authlib-injector flag.
-5. **Custom Yggdrasil** — `Accounts → Custom`, paste server URL (e.g. `https://auth.example.com`) + credentials. Launches with `-javaagent:authlib-injector.jar=URL`.
+1. **Microsoft Device Link (another device) — RECOMMENDED** — `Accounts → Device Link` shows `microsoft.com/link` + code + countdown. Enter the code on your phone/PC, approve the Microsoft login there — the launcher completes automatically. Needs a Microsoft account that owns Minecraft Java.
+2. **Offline** — `Accounts → Offline`, any name (3–16 letters/numbers/_). Instant, no Microsoft. Singleplayer + `online-mode=false` servers only — no Hypixel, Realms, or Mojang skins.
+3. **Ely.by** — free Mojang-style accounts with working skins. Tutorial:
+   1. Create a free account at https://account.ely.by (verify your email).
+   2. In the launcher: `Accounts → Ely.by`, enter your Ely.by email (or nickname) + password.
+   3. Press Sign in. Your Ely skin shows on Ely-enabled servers; everywhere else you appear default/offline.
+   4. Wrong password? Reset it on the Ely.by site, then try again. The launcher only keeps the session token, never your password.
+4. **Custom Yggdrasil** — `Accounts → Custom`, paste server URL (`https://…`, http only for localhost) + that server's credentials. Launches with `-javaagent:authlib-injector.jar=URL`. Only use servers you trust.
 
-Tell me which to keep and I will remove the rest + update this README.
+Advanced: Settings → Microsoft Client ID lets you use your own Azure app registration instead of the built-in one.
 
 ## Build from source
 

@@ -3,6 +3,13 @@ All notable changes documented. Format based on Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-28
+### Fixed
+- Microsoft Device Link: working client ID (verified live) + overridable in Settings.
+- Offline + Ely.by error handling; per-method in-app guides.
+### Removed
+- Microsoft Browser sign-in.
+
 ## [0.2.0] - 2026-09-28
 ### Added
 - Onboarding: first-launch sign-in gate (all 5 auth ways) + Java setup with progress.

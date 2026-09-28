@@ -91,7 +91,8 @@ declare global {
       startDeviceFlow(): Promise<DeviceFlow>;
       pollDeviceFlow(deviceCode: string): Promise<unknown>;
       cancelDeviceFlow(deviceCode?: string): Promise<void>;
-      signInBrowser(): Promise<unknown>;
+      getMsClientId(): Promise<string>;
+      setMsClientId(id: string): Promise<string>;
       signInElyby(username: string, password: string): Promise<unknown>;
       signInCustom(server: string, username: string, password: string): Promise<unknown>;
       removeAccount(id: string): Promise<void>;

@@ -26,6 +26,8 @@ export interface GoonerSettings {
   discordRpc: boolean;
   /** Active account id (auth:active:get/set). null = none selected. */
   activeAccountId: string | null;
+  /** Microsoft app (client) id override for device-code auth. null = built-in default. */
+  msClientId: string | null;
 }
 
 export function getDefaultDataDir(): string {
@@ -58,6 +60,7 @@ export function defaultSettings(): GoonerSettings {
     closeOnLaunch: false,
     discordRpc: true,
     activeAccountId: null,
+    msClientId: null,
   };
 }
 
@@ -78,6 +81,9 @@ function sanitize(input: Partial<GoonerSettings>, base: GoonerSettings): GoonerS
       : base.theme;
   const rawActive = input.activeAccountId ?? base.activeAccountId;
   const activeAccountId = typeof rawActive === 'string' && rawActive.length > 0 ? rawActive : null;
+  const rawMs = input.msClientId ?? base.msClientId;
+  const msClientId =
+    typeof rawMs === 'string' && /^[0-9a-f-]{8,64}$/i.test(rawMs.trim()) ? rawMs.trim() : null;
   return {
     maxRamMb,
     minRamMb,
@@ -91,6 +97,7 @@ function sanitize(input: Partial<GoonerSettings>, base: GoonerSettings): GoonerS
     closeOnLaunch: Boolean(input.closeOnLaunch ?? base.closeOnLaunch),
     discordRpc: input.discordRpc ?? base.discordRpc,
     activeAccountId,
+    msClientId,
   };
 }
 

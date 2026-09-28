@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ProgressBar } from '../components/ui';
+import { Guide, friendlyAuthError, isValidOfflineName } from '../components/authHelp';
 
-type Method = 'device' | 'browser' | 'offline' | 'elyby' | 'custom' | null;
+type Method = 'device' | 'offline' | 'elyby' | 'custom' | null;
 type Step = 'welcome' | 'auth' | 'java' | 'done';
 
 interface ExtGooner {
@@ -9,7 +10,6 @@ interface ExtGooner {
   startDeviceFlow?: () => Promise<{ userCode: string; verificationUri: string; verificationUriComplete?: string; expiresIn: number; sessionId: string }>;
   pollDeviceFlow?: (id: string) => Promise<unknown>;
   cancelDeviceFlow?: (id?: string) => Promise<unknown>;
-  signInBrowser?: () => Promise<unknown>;
   signInOffline?: (u: string) => Promise<unknown>;
   signInElyby?: (u: string, p: string) => Promise<unknown>;
   signInCustom?: (s: string, u: string, p: string) => Promise<unknown>;
@@ -94,83 +94,80 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
   };
 
   const startDevice = async () => {
+    if (busy) return;
     setMethod('device');
-    setStatus('Requesting device code…');
+    setBusy(true);
+    setStatus('Requesting a sign-in code from Microsoft…');
     try {
       const f = await (window.gooner as unknown as ExtGooner | undefined)?.startDeviceFlow?.();
-      if (!f) throw new Error('device flow unavailable');
+      if (!f?.userCode || !f?.sessionId) throw new Error('no code returned — check your connection and try again');
       setUserCode(f.userCode);
       setVerifyUrl(f.verificationUriComplete ?? f.verificationUri);
       setSessionId(f.sessionId);
       setLeft(f.expiresIn);
-      setStatus('Waiting — complete sign-in on another device…');
+      setStatus('Code ready — follow the steps below.');
       pollAlive.current = true;
       try {
         const acc = await (window.gooner as unknown as ExtGooner | undefined)?.pollDeviceFlow?.(f.sessionId);
         pollAlive.current = false;
+        setSessionId('');
         await afterAuth(acc, 'player');
       } catch (e) {
-        if (pollAlive.current) setStatus(`Device flow failed: ${(e as Error)?.message ?? e}`);
+        if (pollAlive.current) setStatus(friendlyAuthError(e, 'Device sign-in failed'));
       }
     } catch (e) {
-      setStatus(`Device flow unavailable: ${(e as Error)?.message ?? e}. Showing demo code.`);
-      setUserCode('XKCD-4242');
-      setVerifyUrl('https://www.microsoft.com/link');
-      setSessionId('demo');
-      setLeft(900);
-    }
-  };
-
-  const doBrowser = async () => {
-    setMethod('browser');
-    setBusy(true);
-    setStatus('Opening browser…');
-    try {
-      const acc = await (window.gooner as unknown as ExtGooner | undefined)?.signInBrowser?.();
-      if (!acc) throw new Error('no result from browser sign-in');
-      await afterAuth(acc, 'player');
-    } catch (e) {
-      setStatus(`Browser sign-in failed: ${(e as Error)?.message ?? e}`);
+      setStatus(friendlyAuthError(e, 'Could not get a sign-in code'));
     } finally {
       setBusy(false);
     }
   };
 
+  const cancelDevice = () => {
+    pollAlive.current = false;
+    if (sessionId && sessionId !== 'demo') {
+      (window.gooner as unknown as ExtGooner | undefined)?.cancelDeviceFlow?.(sessionId)?.catch(() => undefined);
+    }
+    setSessionId('');
+    setUserCode('');
+    setLeft(0);
+    setStatus('Cancelled — press Device Link to start over.');
+  };
+
   const doOffline = async () => {
     const name = offlineName.trim();
-    if (!name) return;
+    if (!isValidOfflineName(name) || busy) return;
     setBusy(true);
     try {
       const acc = await (window.gooner as unknown as ExtGooner | undefined)?.signInOffline?.(name);
       await afterAuth(acc ?? { minecraftUsername: name }, name);
     } catch (e) {
-      setStatus(`Offline failed: ${(e as Error)?.message ?? e}`);
+      setStatus(friendlyAuthError(e, 'Offline sign-in failed'));
     } finally {
       setBusy(false);
     }
   };
 
   const doElyby = async () => {
-    if (!elyUser || !elyPass) { setStatus('Enter Ely.by email and password.'); return; }
+    if (!elyUser.trim() || !elyPass || busy) return;
     setBusy(true);
     try {
-      const acc = await (window.gooner as unknown as ExtGooner | undefined)?.signInElyby?.(elyUser, elyPass);
-      await afterAuth(acc ?? { minecraftUsername: elyUser }, elyUser);
+      const acc = await (window.gooner as unknown as ExtGooner | undefined)?.signInElyby?.(elyUser.trim(), elyPass);
+      await afterAuth(acc ?? { minecraftUsername: elyUser.trim() }, elyUser.trim());
     } catch (e) {
-      setStatus(`Ely.by failed: ${(e as Error)?.message ?? e}`);
+      setStatus(friendlyAuthError(e, 'Ely.by sign-in failed'));
     } finally {
       setBusy(false);
     }
   };
 
   const doCustom = async () => {
-    if (!custom.server || !custom.user || !custom.pass) { setStatus('Enter server, username and password.'); return; }
+    if (!custom.server.trim() || !custom.user.trim() || !custom.pass || busy) return;
     setBusy(true);
     try {
-      const acc = await (window.gooner as unknown as ExtGooner | undefined)?.signInCustom?.(custom.server, custom.user, custom.pass);
-      await afterAuth(acc ?? { minecraftUsername: custom.user }, custom.user);
+      const acc = await (window.gooner as unknown as ExtGooner | undefined)?.signInCustom?.(custom.server.trim(), custom.user.trim(), custom.pass);
+      await afterAuth(acc ?? { minecraftUsername: custom.user.trim() }, custom.user.trim());
     } catch (e) {
-      setStatus(`Custom server failed: ${(e as Error)?.message ?? e}`);
+      setStatus(friendlyAuthError(e, 'Custom server sign-in failed'));
     } finally {
       setBusy(false);
     }
@@ -252,15 +249,9 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
           <div>
             <div className="stack">
               <div className="card" style={{ padding: 10 }}>
-                <button type="button" className="btn-ghost btn-block" style={{ ...optBtn, border: 0, background: 'transparent', padding: 4 }} onClick={() => void startDevice()}>
+                <button type="button" className="btn-ghost btn-block" style={{ ...optBtn, border: 0, background: 'transparent', padding: 4 }} disabled={busy} onClick={() => void startDevice()}>
                   <span className="auth-ico">🔗</span>
                   <span><b>Microsoft Device Link</b><br /><span className="tiny muted">Code + microsoft.com/link for another device</span></span>
-                </button>
-              </div>
-              <div className="card" style={{ padding: 10 }}>
-                <button type="button" className="btn-ghost btn-block" style={{ ...optBtn, border: 0, background: 'transparent', padding: 4 }} disabled={busy} onClick={() => void doBrowser()}>
-                  <span className="auth-ico">🌐</span>
-                  <span><b>Microsoft Browser</b><br /><span className="tiny muted">System browser OAuth</span></span>
                 </button>
               </div>
               <div className="card" style={{ padding: 10 }}>
@@ -287,42 +278,52 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
 
             {method === 'device' && userCode && (
               <div className="card" style={{ marginTop: 12, textAlign: 'center' }}>
-                <div style={{ fontWeight: 700, fontSize: 13 }}>1 — Go to <span className="mono" style={{ color: 'var(--accent)' }}>microsoft.com/link</span></div>
-                <div className="tiny muted">2 — Enter this code on another device:</div>
+                <Guide method="device" />
+                <div style={{ height: 10 }} />
                 <div className="code-box">{userCode}</div>
                 <div className="row" style={{ justifyContent: 'center' }}>
                   <button type="button" className="btn-primary btn-sm" onClick={() => { if (userCode) void navigator.clipboard?.writeText(userCode); }}>Copy code</button>
                   <button type="button" className="btn-ghost btn-sm" onClick={() => { (window.gooner as unknown as ExtGooner | undefined)?.openExternal?.(verifyUrl)?.catch(() => undefined); }}>Open link</button>
+                  <button type="button" className="btn-ghost btn-sm" onClick={() => cancelDevice()}>Cancel</button>
                 </div>
-                <div className="mono tiny muted" style={{ marginTop: 10 }}>{mmss} remaining</div>
+                <div className="mono tiny muted" style={{ marginTop: 10 }}>{mmss} remaining — waiting for approval…</div>
               </div>
             )}
             {method === 'offline' && (
               <div className="card" style={{ marginTop: 12 }}>
                 <b>Offline profile</b>
+                <div style={{ marginTop: 8 }}><Guide method="offline" /></div>
                 <div className="row" style={{ marginTop: 8 }}>
                   <input className="input" placeholder="Steve_2009" value={offlineName} onChange={(e) => setOfflineName(e.target.value)} aria-label="Offline username" />
-                  <button type="button" className="btn-primary" disabled={!offlineName.trim() || busy} onClick={() => void doOffline()}>Save</button>
+                  <button type="button" className="btn-primary" disabled={!isValidOfflineName(offlineName.trim()) || busy} onClick={() => void doOffline()}>Save</button>
                 </div>
+                {offlineName.trim().length > 0 && !isValidOfflineName(offlineName.trim()) && (
+                  <div className="tiny" style={{ marginTop: 6, color: 'var(--danger, #d33)' }}>Use 3–16 characters: letters, numbers, underscore only.</div>
+                )}
               </div>
             )}
             {method === 'elyby' && (
               <div className="card" style={{ marginTop: 12 }}>
                 <b>Ely.by</b>
+                <div style={{ marginTop: 8 }}><Guide method="elyby" /></div>
                 <input className="input" style={{ marginTop: 8 }} placeholder="email or nickname" value={elyUser} onChange={(e) => setElyUser(e.target.value)} aria-label="Ely.by username" />
                 <input className="input" style={{ marginTop: 8 }} type="password" placeholder="password" value={elyPass} onChange={(e) => setElyPass(e.target.value)} aria-label="Ely.by password" />
-                <button type="button" className="btn-primary" style={{ marginTop: 8 }} disabled={busy} onClick={() => void doElyby()}>Sign in with Ely.by</button>
+                <div className="row" style={{ marginTop: 8 }}>
+                  <button type="button" className="btn-primary" disabled={!elyUser.trim() || !elyPass || busy} onClick={() => void doElyby()}>Sign in with Ely.by</button>
+                  <button type="button" className="btn-ghost btn-sm" onClick={() => { (window.gooner as unknown as ExtGooner | undefined)?.openExternal?.('https://account.ely.by/register')?.catch(() => undefined); }}>Create free account</button>
+                </div>
               </div>
             )}
             {method === 'custom' && (
               <div className="card" style={{ marginTop: 12 }}>
                 <b>Custom auth server</b>
+                <div style={{ marginTop: 8 }}><Guide method="custom" /></div>
                 <input className="input mono" style={{ marginTop: 8 }} placeholder="https://auth.example.com" value={custom.server} onChange={(e) => setCustom({ ...custom, server: e.target.value })} aria-label="Auth server URL" />
                 <div className="row" style={{ marginTop: 8 }}>
                   <input className="input" placeholder="username" value={custom.user} onChange={(e) => setCustom({ ...custom, user: e.target.value })} aria-label="Custom username" />
                   <input className="input" type="password" placeholder="password" value={custom.pass} onChange={(e) => setCustom({ ...custom, pass: e.target.value })} aria-label="Custom password" />
                 </div>
-                <button type="button" className="btn-primary" style={{ marginTop: 8 }} disabled={busy} onClick={() => void doCustom()}>Connect</button>
+                <button type="button" className="btn-primary" style={{ marginTop: 8 }} disabled={!custom.server.trim() || !custom.user.trim() || !custom.pass || busy} onClick={() => void doCustom()}>Connect</button>
               </div>
             )}
 
