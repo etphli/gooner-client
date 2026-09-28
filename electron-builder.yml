@@ -80,4 +80,6 @@ linux:
 
 publish:
   provider: github
+  owner: etphli
+  repo: gooner-client
   releaseType: draft

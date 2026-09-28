@@ -1,7 +1,7 @@
 {
   "name": "gooner-client",
   "productName": "Gooner Client",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Gooner Client — open-source Minecraft launcher for macOS (OneClient parity minus World Hosting)",
   "author": "Gooner Client Contributors",
   "license": "GPL-3.0-only",

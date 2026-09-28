@@ -3,6 +3,10 @@ All notable changes documented. Format based on Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-28
+### Fixed
+- In-app updates: publish latest-mac.yml so the updater can find new versions.
+
 ## [0.3.0] - 2026-09-28
 ### Added
 - Proxy support: OS proxy auto-detect + manual proxy in Settings (no VPN needed).
