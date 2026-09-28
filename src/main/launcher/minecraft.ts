@@ -101,11 +101,50 @@ export async function fetchVersionManifest(force = false): Promise<VersionManife
   if (manifestCache && !force && Date.now() - manifestCache.at < 10 * 60_000) {
     return manifestCache.value;
   }
-  const res = await fetch(MOJANG_MANIFEST, { headers: UA });
-  if (!res.ok) throw new Error(`version_manifest failed: ${res.status}`);
-  const value = (await res.json()) as VersionManifest;
-  manifestCache = { at: Date.now(), value };
-  return value;
+  try {
+    const { fetchWithRetry } = await import('../net.js');
+    const res = await fetchWithRetry(MOJANG_MANIFEST, { headers: UA }, { label: 'Minecraft versions', timeoutMs: 20000, retries: 2 });
+    if (!res.ok) throw new Error(`version_manifest failed: ${res.status}`);
+    const value = (await res.json()) as VersionManifest;
+    manifestCache = { at: Date.now(), value };
+    // Persist for offline/DNS-failure use.
+    try {
+      const { getDefaultDataDir } = await import('./settings.js');
+      const file = path.join(getDefaultDataDir(), 'manifest-cache.json');
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.writeFile(file, JSON.stringify({ at: Date.now(), manifest: value }), 'utf-8');
+    } catch {
+      /* cache best-effort */
+    }
+    return value;
+  } catch (e) {
+    // Disk cache (any age), then bundled fallback — the version picker
+    // must always have something to show.
+    try {
+      const { getDefaultDataDir } = await import('./settings.js');
+      const raw = await fs.readFile(path.join(getDefaultDataDir(), 'manifest-cache.json'), 'utf-8');
+      const parsed = JSON.parse(raw) as { manifest?: VersionManifest };
+      if (parsed.manifest?.versions?.length) {
+        manifestCache = { at: Date.now(), value: parsed.manifest };
+        return parsed.manifest;
+      }
+    } catch {
+      /* fall through */
+    }
+    const mod = (await import('../../../data/mc-versions.json', { with: { type: 'json' } }).catch(() => null)) as {
+      default?: { releases?: string[] };
+    } | null;
+    const releases: string[] = mod?.default?.releases ?? ['1.21.1', '1.20.4', '1.20.1'];
+    const value: VersionManifest = {
+      latest: { release: releases[0] ?? '1.21.1', snapshot: '' },
+      versions: releases.map((id) => ({ id, type: 'release', url: '', time: '', releaseTime: '', sha1: '' })),
+    };
+    manifestCache = { at: Date.now(), value };
+    if ((e as Error)?.name !== 'AbortError') {
+      console.warn(`[minecraft] version manifest unreachable, using fallback (${(e as Error)?.message ?? e})`);
+    }
+    return value;
+  }
 }
 
 export async function listMcVersions(type: 'release' | 'all' = 'release'): Promise<string[]> {
@@ -114,12 +153,48 @@ export async function listMcVersions(type: 'release' | 'all' = 'release'): Promi
 }
 
 export async function fetchVersionJson(mcVersion: string): Promise<VersionJson> {
+  const { getDefaultDataDir } = await import('./settings.js');
+  const cacheFile = path.join(getDefaultDataDir(), 'meta', `${mcVersion}.json`);
+  const readCache = async (): Promise<VersionJson | null> => {
+    try {
+      const raw = await fs.readFile(cacheFile, 'utf-8');
+      const parsed = JSON.parse(raw) as VersionJson;
+      if (parsed?.id && parsed?.mainClass) return parsed;
+    } catch {
+      /* miss */
+    }
+    return null;
+  };
   const manifest = await fetchVersionManifest();
   const entry = manifest.versions.find((v) => v.id === mcVersion);
-  if (!entry) throw new Error(`Unknown Minecraft version: ${mcVersion}`);
-  const res = await fetch(entry.url, { headers: UA });
-  if (!res.ok) throw new Error(`version json failed: ${res.status}`);
-  return (await res.json()) as VersionJson;
+  if (!entry) {
+    const cached = await readCache();
+    if (cached) return cached;
+    throw new Error(`Unknown Minecraft version: ${mcVersion}`);
+  }
+  if (!entry.url) {
+    // Bundled-fallback entry (offline manifest): only disk cache can satisfy.
+    const cached = await readCache();
+    if (cached) return cached;
+    throw new Error(`Version ${mcVersion} needs one online fetch to cache its metadata first.`);
+  }
+  try {
+    const { fetchWithRetry } = await import('../net.js');
+    const res = await fetchWithRetry(entry.url, { headers: UA }, { label: 'Minecraft versions', timeoutMs: 20000, retries: 2 });
+    if (!res.ok) throw new Error(`version json failed: ${res.status}`);
+    const value = (await res.json()) as VersionJson;
+    try {
+      await fs.mkdir(path.dirname(cacheFile), { recursive: true });
+      await fs.writeFile(cacheFile, JSON.stringify(value), 'utf-8');
+    } catch {
+      /* cache best-effort */
+    }
+    return value;
+  } catch (e) {
+    const cached = await readCache();
+    if (cached) return cached;
+    throw e;
+  }
 }
 
 // ------------------------------------------------------- fabric loader

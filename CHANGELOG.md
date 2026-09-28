@@ -3,7 +3,14 @@ All notable changes documented. Format based on Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
-## [0.2.2] - 2026-09-28
+## [0.3.0] - 2026-09-28
+### Added
+- Proxy support: OS proxy auto-detect + manual proxy in Settings (no VPN needed).
+- Update banner + Dock badge when an update is ready (visible update test).
+- Mods: CurseForge-style browser (sort, detail view, version-aware install), profile chips.
+- Offline-proof version picker (disk cache + bundled fallback); background Java prefetch.
+### Fixed
+- Play no longer uses a fake profile (auto-creates a real Main); picked version is what launches.
 ### Fixed
 - Microsoft Device Link: working client ID (verified live) + overridable in Settings.
 - Network hardening: timeouts, retries, actionable errors (no more bare "fetch failed") across auth, Java, Modrinth.

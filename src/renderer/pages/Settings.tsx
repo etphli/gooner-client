@@ -14,7 +14,7 @@ interface ExtGooner {
 }
 
 const Settings: React.FC<{ theme: Theme; setTheme: (t: Theme) => void }> = ({ theme, setTheme }) => {
-  const [s, setS] = useState<ClientSettings>({ ramMb: 4096, javaPath: '', theme: 'system', resolution: { w: 1280, h: 720 }, showHud: true, closeOnLaunch: true, fov: 90 });
+  const [s, setS] = useState<ClientSettings>({ ramMb: 4096, javaPath: '', proxy: '', theme: 'system', resolution: { w: 1280, h: 720 }, showHud: true, closeOnLaunch: true, fov: 90 });
 
   const [upStatus, setUpStatus] = useState<UpdaterStatus>('idle');
   const [upInfo, setUpInfo] = useState('Up to date check has not run yet.');
@@ -131,6 +131,14 @@ const Settings: React.FC<{ theme: Theme; setTheme: (t: Theme) => void }> = ({ th
           <div className="row">
             <input className="input mono" value={s.javaPath} onChange={(e) => setS({ ...s, javaPath: e.target.value })} onBlur={() => save(s)} placeholder="Auto-provision Temurin 17/21" aria-label="Java path" />
             <button type="button" className="btn-ghost" onClick={async () => { const p = await window.gooner?.browseJava?.()?.catch(() => null); if (p) save({ ...s, javaPath: p }); }}>Browse…</button>
+          </div>
+        </Field>
+      </Card>
+      <div style={{ height: 10 }} />
+      <Card>
+        <Field label="Network proxy (optional)" hint="If sign-in or downloads fail with DNS/network errors, enter your proxy (http://host:port). Empty = system proxy / direct. Never route logins through free VPNs.">
+          <div className="row">
+            <input className="input mono" value={s.proxy} onChange={(e) => setS({ ...s, proxy: e.target.value })} onBlur={() => save(s)} placeholder="http://proxy.local:8080" aria-label="Network proxy" />
           </div>
         </Field>
       </Card>

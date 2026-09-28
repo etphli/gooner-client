@@ -6,6 +6,7 @@ type VersionFilter = 'release' | 'snapshot';
 
 interface ExtGooner {
   getInstances?: () => Promise<unknown>;
+  createInstance?: (input: { name: string; mcVersion: string; modLoader?: string }) => Promise<unknown>;
   getVersions?: (filter?: string) => Promise<unknown>;
   launch?: (opts: { instanceId: string; version?: string }) => Promise<unknown>;
   cancelLaunch?: () => Promise<unknown>;
@@ -31,11 +32,12 @@ function isReleaseVersion(v: string): boolean {
   return /^\d+\.\d+(\.\d+)?$/.test(v.trim());
 }
 
-const FALLBACK_VERSIONS = ['1.21.1', '1.20.4', '1.20.1'];
+const FALLBACK_VERSIONS = ['1.21.1', '1.21.10', '1.21.11', '1.20.4', '1.20.1'];
 
 const Play: React.FC = () => {
-  const [instances, setInstances] = useState<Instance[]>([{ id: 'main', name: 'Main Survival', version: '1.21.1', loader: 'fabric' }]);
-  const [instanceId, setInstanceId] = useState('main');
+  const [instances, setInstances] = useState<Instance[]>([]);
+  const [instanceId, setInstanceId] = useState('');
+  const [loadingInstances, setLoadingInstances] = useState(true);
   const [filter, setFilter] = useState<VersionFilter>('release');
   const [versions, setVersions] = useState<string[]>(FALLBACK_VERSIONS);
   const [version, setVersion] = useState('1.21.1');
@@ -46,10 +48,41 @@ const Play: React.FC = () => {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    (window.gooner as unknown as ExtGooner | undefined)?.getInstances?.()?.then((l) => {
-      const list = asInstances(l);
-      if (list.length) { setInstances(list); setInstanceId(list[0].id); }
-    })?.catch(() => undefined);
+    let cancelled = false;
+    (async () => {
+      setLoadingInstances(true);
+      try {
+        const ext = window.gooner as unknown as ExtGooner | undefined;
+        const list = asInstances(await ext?.getInstances?.());
+        if (cancelled) return;
+        if (list.length > 0) {
+          setInstances(list);
+          setInstanceId((cur) => (list.some((i) => i.id === cur) ? cur : list[0].id));
+        } else {
+          // First run: create a real default profile so Play always has a target.
+          try {
+            const created = await ext?.createInstance?.({ name: 'Main', mcVersion: '1.21.1', modLoader: 'fabric' });
+            const fresh = asInstances(await ext?.getInstances?.());
+            if (cancelled) return;
+            if (fresh.length > 0) {
+              setInstances(fresh);
+              const asRec = created as Record<string, unknown> | undefined;
+              const cid = typeof asRec?.id === 'string' ? (asRec.id as string) : fresh[0].id;
+              setInstanceId(fresh.some((i) => i.id === cid) ? cid : fresh[0].id);
+            } else {
+              setError('Could not create the default profile. Create one in Mods → Profiles.');
+            }
+          } catch (e) {
+            if (!cancelled) setError(`Profiles unavailable: ${(e as Error)?.message ?? e}. Create one in Mods → Profiles.`);
+          }
+        }
+      } catch (e) {
+        if (!cancelled) setError(`Profiles unavailable: ${(e as Error)?.message ?? e}`);
+      } finally {
+        if (!cancelled) setLoadingInstances(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const loadVersions = useCallback(async (f: VersionFilter) => {
@@ -112,7 +145,7 @@ const Play: React.FC = () => {
   useEffect(() => { void loadVersions(filter); }, [filter, loadVersions]);
 
   const launch = async () => {
-    if (launching) return;
+    if (launching || !instanceId) return;
     setLaunching(true);
     setError('');
     setProgress(1);
@@ -172,9 +205,15 @@ const Play: React.FC = () => {
         <div style={{ width: 96, height: 96, borderRadius: 14, flexShrink: 0, background: 'linear-gradient(135deg,#2563eb,#9333ea)', display: 'grid', placeItems: 'center', fontSize: 42 }} aria-hidden>⛏️</div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <label className="label" htmlFor="play-instance">Instance</label>
-          <select id="play-instance" className="select" value={instanceId} onChange={(e) => setInstanceId(e.target.value)}>
-            {instances.map((i) => <option key={i.id} value={i.id}>{i.name}{i.loader ? ` — ${i.loader}` : ''}</option>)}
-          </select>
+          {loadingInstances ? (
+            <div className="tiny muted">Loading profiles…</div>
+          ) : instances.length === 0 ? (
+            <div className="tiny muted">No profiles yet — create one in Mods → Profiles, then come back.</div>
+          ) : (
+            <select id="play-instance" className="select" value={instanceId} onChange={(e) => setInstanceId(e.target.value)}>
+              {instances.map((i) => <option key={i.id} value={i.id}>{i.name}{i.loader ? ` — ${i.loader}` : ''}</option>)}
+            </select>
+          )}
           <div style={{ height: 8 }} />
           <label className="label" htmlFor="play-version">Version {loadingVersions ? '· loading…' : `· ${versions.length}`}</label>
           <select id="play-version" className="select mono" value={version} onChange={(e) => setVersion(e.target.value)}>
@@ -186,7 +225,7 @@ const Play: React.FC = () => {
       <div style={{ height: 10 }} />
       <Card>
         <div className="row">
-          <button className="btn-primary" style={{ fontSize: 14, padding: '9px 30px' }} disabled={launching} onClick={() => void launch()}>
+          <button className="btn-primary" style={{ fontSize: 14, padding: '9px 30px' }} disabled={launching || !instanceId} onClick={() => void launch()}>
             {launching ? (<><span className="spinner" aria-hidden /><span>Launching…</span></>) : '▶  Play'}
           </button>
           {launching && <button className="btn-ghost" onClick={() => void cancel()}>Cancel</button>}

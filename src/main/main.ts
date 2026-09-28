@@ -205,9 +205,16 @@ function registerIpc(): void {
     emit(10, 'Resolving instance...');
     const rawId = (req as { instanceId?: unknown } | null | undefined)?.instanceId;
     if (typeof rawId !== 'string' || !rawId) throw new Error('Invalid instanceId');
-    const { getInstance, getInstanceDir, markPlayed } = await import('./launcher/instances.js');
+    const { getInstance, getInstanceDir, markPlayed, updateInstance } = await import('./launcher/instances.js');
     const inst = await getInstance(rawId);
-    if (!inst) throw new Error(`Instance not found: ${rawId}`);
+    if (!inst) throw new Error(`Instance not found: ${rawId}. Create a profile in Mods → Profiles first.`);
+    // The version picked in Play wins for this launch (and becomes the default).
+    const rawVer = (req as { version?: unknown } | null | undefined)?.version;
+    let mcVersion = inst.mcVersion;
+    if (typeof rawVer === 'string' && /^[0-9a-z._-]+$/i.test(rawVer) && rawVer !== inst.mcVersion) {
+      mcVersion = rawVer;
+      await updateInstance(rawId, { mcVersion }).catch(() => undefined);
+    }
     const gameDir = getInstanceDir(rawId);
     const { listAccounts } = await import('./auth/store.js');
     const { loadSettings } = await import('./launcher/settings.js');
@@ -224,7 +231,7 @@ function registerIpc(): void {
     const account = { username: raw.minecraftUsername, uuid: raw.minecraftUuid, accessToken };
     emit(40, 'Ensuring Java...');
     const { ensureJavaForMinecraft } = await import('./launcher/java.js');
-    await ensureJavaForMinecraft(inst.mcVersion, {
+    await ensureJavaForMinecraft(mcVersion, {
       onProgress: (msg: string) => {
         try {
           sender.send('launcher:progress', { percent: 40, task: msg });
@@ -236,7 +243,7 @@ function registerIpc(): void {
     emit(70, 'Preparing libraries and assets...');
     const { launchMinecraft } = await import('./launcher/minecraft.js');
     const child = await launchMinecraft({
-      mcVersion: inst.mcVersion,
+      mcVersion,
       modLoader: inst.modLoader,
       loaderVersion: inst.loaderVersion ?? undefined,
       account,
@@ -341,8 +348,26 @@ function wireAutoUpdater(): void {
   autoUpdater.on('update-available', (i) => send('updater:available', i));
   autoUpdater.on('update-not-available', (i) => send('updater:not-available', i));
   autoUpdater.on('download-progress', (p) => send('updater:progress', p));
-  autoUpdater.on('update-downloaded', (i) => send('updater:downloaded', i));
+  autoUpdater.on('update-downloaded', (i) => {
+    send('updater:downloaded', i);
+    try {
+      if (process.platform === 'darwin' && app.dock) {
+        app.dock.setBadge('•');
+        app.dock.bounce('informational');
+      }
+    } catch {
+      /* dock badge best-effort */
+    }
+  });
   autoUpdater.on('error', (e) => send('updater:error', String(e)));
+}
+
+function clearDockBadge(): void {
+  try {
+    if (process.platform === 'darwin' && app.dock) app.dock.setBadge('');
+  } catch {
+    /* ignore */
+  }
 }
 
 app.whenReady().then(async () => {
@@ -350,9 +375,22 @@ app.whenReady().then(async () => {
   wireAutoUpdater();
   await createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) void createWindow(); });
+  app.on('browser-window-focus', () => clearDockBadge());
   if (!isDev && app.isPackaged) {
     try { await autoUpdater.checkForUpdatesAndNotify(); } catch { /* renderer can retry */ }
   }
+  // Background Java prefetch so first launch rarely waits on a 200MB download.
+  void (async () => {
+    try {
+      const { fetchVersionManifest } = await import('./launcher/minecraft.js');
+      const manifest = await fetchVersionManifest().catch(() => null);
+      const target = manifest?.latest?.release ?? '1.21.1';
+      const { ensureJavaForMinecraft } = await import('./launcher/java.js');
+      await ensureJavaForMinecraft(target, {}).catch(() => undefined);
+    } catch {
+      /* background best-effort */
+    }
+  })();
 });
 app.on('second-instance', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus(); } });
 app.on('window-all-closed', () => { if (!isMac) app.quit(); });

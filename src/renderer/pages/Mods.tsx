@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, SectionTitle, Toggle } from '../components/ui';
-import ModCard from '../components/ModCard';
+import ModCard, { formatDownloads } from '../components/ModCard';
 
 // Electron-only CSS property used by TitleBar (pre-existing file, do not touch).
 // Augment here so `tsc --noEmit` passes repo-wide while only editing allowed files.
@@ -10,8 +10,32 @@ declare module 'react' {
   }
 }
 
-/* Spec-shaped local types (gooner.d.ts is legacy — calls below use
-   optional chaining + ts-ignore so they typecheck either way). */
+/* Local bridge casts — `any`-free optional calls over window.gooner.
+   gooner.d.ts is legacy; these optional signatures match the spec. */
+interface BridgeInstanceInput {
+  name: string;
+  mcVersion: string;
+  modLoader?: 'fabric' | 'vanilla';
+  loaderVersion?: string | null;
+}
+
+interface GoonerBridge {
+  getInstances?: () => Promise<unknown>;
+  getVersions?: (filter?: string) => Promise<unknown>;
+  createInstance?: (input: BridgeInstanceInput) => Promise<unknown>;
+  deleteInstance?: (id: string) => Promise<unknown>;
+  launch?: (opts: { instanceId: string }) => Promise<unknown>;
+  searchMods?: (query: string, mcVersion?: string) => Promise<unknown>;
+  installMod?: (instanceId: string, slug: string, mcVersion?: string) => Promise<unknown>;
+  getMods?: (instanceId: string) => Promise<unknown>;
+  toggleMod?: (instanceId: string, slug: string, enabled: boolean) => Promise<unknown>;
+  removeMod?: (instanceId: string, slug: string) => Promise<unknown>;
+}
+
+function getBridge(): GoonerBridge | undefined {
+  return window.gooner as unknown as GoonerBridge | undefined;
+}
+
 interface Profile {
   id: string;
   name: string;
@@ -39,6 +63,9 @@ interface InstalledMod {
 }
 
 type LoaderChoice = 'fabric' | 'vanilla';
+type SortKey = 'relevance' | 'popular' | 'newest';
+
+const FALLBACK_VERSIONS: string[] = ['1.21.1', '1.21.10', '1.21.11', '1.20.4', '1.20.1'];
 
 function asRecord(v: unknown): Record<string, unknown> {
   return typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : {};
@@ -96,15 +123,49 @@ function normalizeInstalledMod(raw: unknown): InstalledMod | null {
   return { slug, name, enabled, version, file };
 }
 
-function formatLastPlayed(v?: string | null): string {
-  if (!v) return 'Never played';
-  const t = Date.parse(v);
-  if (Number.isNaN(t)) return String(v);
-  return `Last played ${new Date(t).toLocaleDateString()}`;
+function errMsg(e: unknown, fallback: string): string {
+  if (e instanceof Error && e.message) return e.message;
+  if (typeof e === 'string' && e) return e;
+  return fallback;
+}
+
+/** Offline-friendly wrapper: nudges toward proxy Settings on fetch failures. */
+function withProxyHint(msg: string): string {
+  const m = msg.toLowerCase();
+  const looksOffline =
+    m.includes('fetch') ||
+    m.includes('network') ||
+    m.includes('failed') ||
+    m.includes('offline') ||
+    m.includes('enotfound') ||
+    m.includes('econn') ||
+    m.includes('timeout') ||
+    m.includes('load') ||
+    m.includes('modrinth');
+  return looksOffline
+    ? `${msg} Check your connection and proxy under Settings.`
+    : `${msg} If you're offline, check proxy under Settings.`;
 }
 
 const muted: React.CSSProperties = { color: 'var(--text2)' };
 const rowBetween: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 10 };
+const errBox: React.CSSProperties = { border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12 };
+
+function SkeletonCard(): React.JSX.Element {
+  return (
+    <div
+      aria-hidden
+      style={{ display: 'flex', gap: 12, padding: '12px 14px', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}
+    >
+      <div style={{ width: 40, height: 40, borderRadius: 10, background: 'var(--card-2)', flexShrink: 0 }} />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ height: 12, width: '55%', borderRadius: 6, background: 'var(--card-2)' }} />
+        <div style={{ height: 10, width: '95%', borderRadius: 6, background: 'var(--card-2)' }} />
+        <div style={{ height: 10, width: '70%', borderRadius: 6, background: 'var(--card-2)' }} />
+      </div>
+    </div>
+  );
+}
 
 const Mods: React.FC = () => {
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -112,11 +173,11 @@ const Mods: React.FC = () => {
   const [profilesError, setProfilesError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  const [versions, setVersions] = useState<string[]>([]);
+  const [versions, setVersions] = useState<string[]>(FALLBACK_VERSIONS);
   const [versionsLoading, setVersionsLoading] = useState(true);
 
   const [createName, setCreateName] = useState('');
-  const [createMcVersion, setCreateMcVersion] = useState('');
+  const [createMcVersion, setCreateMcVersion] = useState(FALLBACK_VERSIONS[0] ?? '');
   const [createLoader, setCreateLoader] = useState<LoaderChoice>('fabric');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -126,34 +187,46 @@ const Mods: React.FC = () => {
   const [launchError, setLaunchError] = useState<string | null>(null);
 
   const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<SortKey>('relevance');
   const [results, setResults] = useState<BrowserMod[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [installingSlug, setInstallingSlug] = useState<string | null>(null);
-  const [installError, setInstallError] = useState<string | null>(null);
+  const [installOk, setInstallOk] = useState<Record<string, boolean>>({});
+  const [installErr, setInstallErr] = useState<Record<string, string>>({});
+
+  const [selected, setSelected] = useState<BrowserMod | null>(null);
+  const closeBtnRef = useRef<HTMLButtonElement | null>(null);
 
   const [installed, setInstalled] = useState<InstalledMod[]>([]);
   const [installedLoading, setInstalledLoading] = useState(false);
   const [installedError, setInstalledError] = useState<string | null>(null);
+  const [modActionError, setModActionError] = useState<string | null>(null);
   const [togglingSlug, setTogglingSlug] = useState<string | null>(null);
   const [removingSlug, setRemovingSlug] = useState<string | null>(null);
 
   const active = useMemo(() => profiles.find((p) => p.id === activeId) ?? null, [profiles, activeId]);
 
+  const sortedResults = useMemo(() => {
+    if (sort === 'popular') return [...results].sort((a, b) => (b.downloads ?? 0) - (a.downloads ?? 0));
+    // "Newest" has no date field from searchMods — deterministic title proxy.
+    if (sort === 'newest') return [...results].sort((a, b) => a.title.localeCompare(b.title));
+    return results;
+  }, [results, sort]);
+
   const refreshProfiles = useCallback(async () => {
     setProfilesLoading(true);
     setProfilesError(null);
     try {
-      const raw = await window.gooner?.getInstances?.();
+      const raw = await getBridge()?.getInstances?.();
       const list = Array.isArray(raw) ? raw.map(normalizeProfile).filter((p): p is Profile => p !== null) : [];
       setProfiles(list);
       setActiveId((prev) => {
         if (prev && list.some((p) => p.id === prev)) return prev;
         return list[0]?.id ?? null;
       });
-      if (list.length === 0) setProfilesError(null);
     } catch (e) {
-      setProfilesError(e instanceof Error ? e.message : 'Failed to load profiles.');
+      setProfilesError(withProxyHint(errMsg(e, 'Failed to load profiles.')));
     } finally {
       setProfilesLoading(false);
     }
@@ -162,15 +235,18 @@ const Mods: React.FC = () => {
   const refreshVersions = useCallback(async () => {
     setVersionsLoading(true);
     try {
-      // @ts-ignore - spec passes 'release' filter; legacy d.ts takes no args
-      const raw = await window.gooner?.getVersions?.('release');
+      const raw = await getBridge()?.getVersions?.('release');
       const list = Array.isArray(raw)
-        ? (raw as unknown[]).map((v) => (typeof v === 'string' ? v : String(asRecord(v).id ?? asRecord(v).version ?? ''))).filter(Boolean)
+        ? (raw as unknown[])
+            .map((v: unknown) => (typeof v === 'string' ? v : String(asRecord(v).id ?? asRecord(v).version ?? '')))
+            .filter((s): s is string => Boolean(s))
         : [];
-      setVersions(list as string[]);
-      setCreateMcVersion((prev) => prev || (list as string[])[0] || '');
+      const finalList = list.length > 0 ? list : FALLBACK_VERSIONS;
+      setVersions(finalList);
+      setCreateMcVersion((prev) => prev || finalList[0] || '');
     } catch {
-      setVersions([]);
+      setVersions(FALLBACK_VERSIONS);
+      setCreateMcVersion((prev) => prev || FALLBACK_VERSIONS[0] || '');
     } finally {
       setVersionsLoading(false);
     }
@@ -186,14 +262,14 @@ const Mods: React.FC = () => {
     setInstalledLoading(true);
     setInstalledError(null);
     try {
-      const raw = await window.gooner?.getMods?.(instanceId);
+      const raw = await getBridge()?.getMods?.(instanceId);
       const list = Array.isArray(raw)
         ? (raw as unknown[]).map(normalizeInstalledMod).filter((m): m is InstalledMod => m !== null)
         : [];
       setInstalled(list);
     } catch (e) {
       setInstalled([]);
-      setInstalledError(e instanceof Error ? e.message : 'Failed to load installed mods.');
+      setInstalledError(withProxyHint(errMsg(e, 'Failed to load installed mods.')));
     } finally {
       setInstalledLoading(false);
     }
@@ -213,15 +289,14 @@ const Mods: React.FC = () => {
       setSearching(true);
       setSearchError(null);
       try {
-        // @ts-ignore - spec signature searchMods(query, mcVersion)
-        const raw = await window.gooner?.searchMods?.(q, mcVersion);
+        const raw = await getBridge()?.searchMods?.(q, mcVersion);
         const list = Array.isArray(raw)
           ? (raw as unknown[]).map(normalizeBrowserMod).filter((m): m is BrowserMod => m !== null)
           : [];
         setResults(list);
       } catch (e) {
         setResults([]);
-        setSearchError(e instanceof Error ? e.message : 'Mod search failed.');
+        setSearchError(withProxyHint(errMsg(e, 'Mod search failed.')));
       } finally {
         setSearching(false);
       }
@@ -229,6 +304,7 @@ const Mods: React.FC = () => {
     [activeId],
   );
 
+  // Debounced search (CurseForge-style: type to filter).
   useEffect(() => {
     if (!activeId) return;
     const mc = active?.mcVersion ?? '';
@@ -238,7 +314,18 @@ const Mods: React.FC = () => {
     return () => window.clearTimeout(t);
   }, [query, active?.mcVersion, activeId, runSearch]);
 
-  const handleCreate = async (e: React.FormEvent) => {
+  // Detail modal: focus Close on open, Esc to close.
+  useEffect(() => {
+    if (!selected) return undefined;
+    closeBtnRef.current?.focus();
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setSelected(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selected]);
+
+  const handleCreate = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
     setCreateError(null);
     const name = createName.trim() || 'New Instance';
@@ -248,86 +335,91 @@ const Mods: React.FC = () => {
     }
     setCreating(true);
     try {
-      // @ts-ignore - spec create API; legacy d.ts lacks createInstance
-      const created = await window.gooner?.createInstance?.({ name, mcVersion: createMcVersion, modLoader: createLoader });
+      const created = await getBridge()?.createInstance?.({ name, mcVersion: createMcVersion, modLoader: createLoader });
       const norm = normalizeProfile(created);
       await refreshProfiles();
       if (norm) setActiveId(norm.id);
       setCreateName('');
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : 'Failed to create profile. Is createInstance exposed?');
+      setCreateError(withProxyHint(errMsg(err, 'Failed to create profile.')));
     } finally {
       setCreating(false);
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string): Promise<void> => {
     if (!window.confirm('Delete this profile? Files on disk may be removed.')) return;
     setDeletingId(id);
     try {
-      // @ts-ignore - spec API newer than gooner.d.ts
-      await window.gooner?.deleteInstance?.(id);
+      await getBridge()?.deleteInstance?.(id);
       await refreshProfiles();
     } catch (e) {
-      setProfilesError(e instanceof Error ? e.message : 'Failed to delete profile.');
+      setProfilesError(withProxyHint(errMsg(e, 'Failed to delete profile.')));
     } finally {
       setDeletingId(null);
     }
   };
 
-  const handlePlay = async (instanceId: string) => {
+  const handlePlay = async (instanceId: string): Promise<void> => {
     setLaunchingId(instanceId);
     setLaunchError(null);
     try {
-      // @ts-ignore - spec calls launch({ instanceId })
-      await window.gooner?.launch?.({ instanceId });
+      await getBridge()?.launch?.({ instanceId });
       await refreshProfiles();
     } catch (e) {
-      setLaunchError(e instanceof Error ? e.message : 'Launch failed.');
+      setLaunchError(withProxyHint(errMsg(e, 'Launch failed.')));
     } finally {
       setLaunchingId(null);
     }
   };
 
-  const handleInstall = async (slug: string) => {
+  const handleInstall = async (slug: string): Promise<void> => {
     if (!activeId) return;
     const mc = active?.mcVersion ?? '';
     setInstallingSlug(slug);
-    setInstallError(null);
+    setInstallErr((prev) => {
+      const next = { ...prev };
+      delete next[slug];
+      return next;
+    });
     try {
-      // @ts-ignore - spec signature installMod(instanceId, slug, mcVersion)
-      await window.gooner?.installMod?.(activeId, slug, mc);
+      await getBridge()?.installMod?.(activeId, slug, mc);
+      setInstallOk((prev) => ({ ...prev, [slug]: true }));
       await refreshInstalled(activeId);
     } catch (e) {
-      setInstallError(e instanceof Error ? e.message : `Failed to install ${slug}.`);
+      setInstallErr((prev) => ({ ...prev, [slug]: withProxyHint(errMsg(e, `Failed to install ${slug}.`)) }));
     } finally {
       setInstallingSlug(null);
     }
   };
 
-  const handleToggle = async (slug: string, next: boolean) => {
+  const handleToggle = async (slug: string, next: boolean): Promise<void> => {
     if (!activeId) return;
+    setModActionError(null);
+    const prev = installed;
     setTogglingSlug(slug);
-    setInstalled((prev) => prev.map((m) => (m.slug === slug ? { ...m, enabled: next } : m)));
+    setInstalled((list) => list.map((m) => (m.slug === slug ? { ...m, enabled: next } : m)));
     try {
-      // @ts-ignore - spec signature toggleMod(instanceId, slug, enabled)
-      await window.gooner?.toggleMod?.(activeId, slug, next);
-    } catch {
-      setInstalled((prev) => prev.map((m) => (m.slug === slug ? { ...m, enabled: !next } : m)));
+      await getBridge()?.toggleMod?.(activeId, slug, next);
+    } catch (e) {
+      setInstalled(prev);
+      setModActionError(withProxyHint(errMsg(e, `Failed to toggle ${slug} — rolled back.`)));
     } finally {
       setTogglingSlug(null);
     }
   };
 
-  const handleRemove = async (slug: string) => {
+  const handleRemove = async (slug: string): Promise<void> => {
     if (!activeId) return;
+    setModActionError(null);
+    const prev = installed;
     setRemovingSlug(slug);
+    setInstalled((list) => list.filter((m) => m.slug !== slug));
     try {
-      // @ts-ignore - spec API newer than gooner.d.ts
-      await window.gooner?.removeMod?.(activeId, slug);
-      setInstalled((prev) => prev.filter((m) => m.slug !== slug));
+      await getBridge()?.removeMod?.(activeId, slug);
     } catch (e) {
-      setInstalledError(e instanceof Error ? e.message : `Failed to remove ${slug}.`);
+      setInstalled(prev);
+      setModActionError(withProxyHint(errMsg(e, `Failed to remove ${slug} — rolled back.`)));
     } finally {
       setRemovingSlug(null);
     }
@@ -337,15 +429,13 @@ const Mods: React.FC = () => {
     <div style={{ maxWidth: 880, display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
         <SectionTitle>Mods</SectionTitle>
-        <p style={{ ...muted, margin: '0 0 4px' }}>Profiles, Modrinth browser, and installed mods — per instance.</p>
-        <p style={{ ...muted, margin: 0, fontSize: 12 }}>
-          CurseForge browsing isn't available yet — Modrinth search + install works fully below.
-        </p>
+        <p style={{ ...muted, margin: '0 0 4px' }}>Profiles, mod browser, and installed mods — per instance.</p>
+        <p style={{ ...muted, margin: 0, fontSize: 12 }}>CurseForge-style browsing over Modrinth search + one-click install.</p>
       </div>
 
       {/* 1 — Profiles */}
       <Card>
-        <div style={{ ...rowBetween, marginBottom: 4 }}>
+        <div style={{ ...rowBetween, marginBottom: 8 }}>
           <h3 style={{ margin: 0, fontSize: 14 }}>Profiles</h3>
           <span style={{ fontSize: 12, ...muted }}>{profilesLoading ? 'Loading…' : `${profiles.length} instance${profiles.length === 1 ? '' : 's'}`}</span>
           <span style={{ marginLeft: 'auto' }}>
@@ -356,84 +446,99 @@ const Mods: React.FC = () => {
         </div>
 
         {profilesLoading ? (
-          <p style={{ ...muted, fontSize: 13 }}>Loading profiles…</p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} aria-label="Loading profiles">
+            <span className="spinner" aria-hidden="true" />
+            <span style={{ fontSize: 13, ...muted }}>Loading profiles…</span>
+          </div>
         ) : profilesError ? (
-          <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12 }}>
+          <div style={errBox}>
             <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text)' }}>⚠ {profilesError}</p>
             <button type="button" className="btn-ghost" onClick={() => void refreshProfiles()}>
               Retry
             </button>
           </div>
         ) : profiles.length === 0 ? (
-          <p style={{ ...muted, fontSize: 13 }}>No profiles yet — create one below.</p>
+          <p style={{ ...muted, fontSize: 13, margin: '0 0 4px' }}>No profiles yet — create one below.</p>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {profiles.map((p) => {
-              const isActive = p.id === activeId;
-              return (
-                <div
-                  key={p.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setActiveId(p.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      setActiveId(p.id);
-                    }
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '10px 12px',
-                    borderRadius: 'var(--radius)',
-                    border: isActive ? '1px solid var(--accent)' : '1px solid var(--border)',
-                    background: isActive ? 'var(--bg)' : 'var(--card)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <strong style={{ color: 'var(--text)', fontSize: 13 }}>{p.name}</strong>
-                      {isActive ? (
-                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)' }}>● Active</span>
-                      ) : null}
+          <>
+            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6 }} role="tablist" aria-label="Profiles">
+              {profiles.map((p) => {
+                const isActive = p.id === activeId;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    onClick={() => setActiveId(p.id)}
+                    title={`${p.name} — ${p.mcVersion || 'unknown version'} • ${p.modLoader}`}
+                    style={{
+                      flexShrink: 0,
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      padding: '8px 12px',
+                      borderRadius: 'var(--radius)',
+                      border: isActive ? '1px solid var(--accent)' : '1px solid var(--border)',
+                      background: isActive ? 'var(--accent-soft)' : 'var(--card)',
+                      color: 'var(--text)',
+                      maxWidth: 220,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                      <strong style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</strong>
+                      {isActive ? <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)' }}>●</span> : null}
                     </div>
-                    <div className="mono" style={{ fontSize: 11, ...muted, marginTop: 2 }}>
-                      {p.mcVersion || 'unknown version'} • {p.modLoader}
-                      {p.loaderVersion ? ` ${p.loaderVersion}` : ''} • {formatLastPlayed(p.lastPlayedAt)}
+                    <div className="mono" style={{ fontSize: 11, ...muted, marginTop: 2, whiteSpace: 'nowrap' }}>
+                      {p.mcVersion || '?'} • {p.modLoader}
                     </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {active ? (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  marginTop: 8,
+                  padding: '10px 12px',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius)',
+                  background: 'var(--card-2)',
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <strong style={{ fontSize: 13, color: 'var(--text)' }}>{active.name}</strong>
+                  <div className="mono" style={{ fontSize: 11, ...muted, marginTop: 2 }}>
+                    {active.mcVersion || 'unknown version'} • {active.modLoader}
+                    {active.loaderVersion ? ` ${active.loaderVersion}` : ''}
                   </div>
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    disabled={launchingId === p.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void handlePlay(p.id);
-                    }}
-                    style={{ padding: '6px 14px', fontSize: 12 }}
-                  >
-                    {launchingId === p.id ? 'Launching…' : '▶ Play'}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-ghost"
-                    disabled={deletingId === p.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void handleDelete(p.id);
-                    }}
-                    aria-label={`Delete ${p.name}`}
-                    style={{ fontSize: 12 }}
-                  >
-                    {deletingId === p.id ? 'Deleting…' : 'Delete'}
-                  </button>
                 </div>
-              );
-            })}
-          </div>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={launchingId === active.id}
+                  onClick={() => void handlePlay(active.id)}
+                  style={{ padding: '6px 14px', fontSize: 12 }}
+                >
+                  {launchingId === active.id ? 'Launching…' : '▶ Play'}
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={deletingId === active.id}
+                  onClick={() => void handleDelete(active.id)}
+                  aria-label={`Delete ${active.name}`}
+                  style={{ fontSize: 12 }}
+                >
+                  {deletingId === active.id ? 'Deleting…' : 'Delete'}
+                </button>
+              </div>
+            ) : null}
+          </>
         )}
         {launchError ? <p style={{ fontSize: 12, color: 'var(--text)', margin: '8px 0 0' }}>⚠ {launchError}</p> : null}
 
@@ -496,10 +601,10 @@ const Mods: React.FC = () => {
             )}
           </span>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <input
             className="input"
-            placeholder={active ? `🔍  Search Modrinth for ${active.mcVersion || 'mods'}…` : '🔍  Select a profile to browse…'}
+            placeholder={active ? `🔍  Search mods for ${active.mcVersion || 'your version'}…` : '🔍  Select a profile to browse…'}
             value={query}
             disabled={!active}
             onChange={(e) => setQuery(e.target.value)}
@@ -509,7 +614,22 @@ const Mods: React.FC = () => {
                 void runSearch(query.trim(), active?.mcVersion ?? '');
               }
             }}
+            style={{ flex: 1, minWidth: 200 }}
+            aria-label="Search mods"
           />
+          <select
+            className="select"
+            value={sort}
+            onChange={(e) => setSort(e.target.value === 'popular' || e.target.value === 'newest' ? e.target.value : 'relevance')}
+            disabled={!active}
+            aria-label="Sort mods"
+            title={sort === 'newest' ? 'Newest uses title order (no date field from API)' : 'Sort order'}
+            style={{ width: 'auto' }}
+          >
+            <option value="relevance">Relevance</option>
+            <option value="popular">Popular</option>
+            <option value="newest">Newest</option>
+          </select>
           <button
             type="button"
             className="btn-ghost"
@@ -524,9 +644,13 @@ const Mods: React.FC = () => {
           {!active ? (
             <p style={{ ...muted, fontSize: 13, margin: 0 }}>No active profile — pick one above to browse mods.</p>
           ) : searching ? (
-            <p style={{ ...muted, fontSize: 13, margin: 0 }}>Searching Modrinth…</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }} aria-label="Searching mods">
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <SkeletonCard key={i} />
+              ))}
+            </div>
           ) : searchError ? (
-            <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12 }}>
+            <div style={errBox}>
               <p style={{ margin: '0 0 8px', fontSize: 13 }}>⚠ {searchError}</p>
               <button
                 type="button"
@@ -536,16 +660,27 @@ const Mods: React.FC = () => {
                 Retry
               </button>
             </div>
-          ) : results.length === 0 ? (
+          ) : sortedResults.length === 0 ? (
             <p style={{ ...muted, fontSize: 13, margin: 0 }}>
-              {query ? `No results for “${query}”.` : 'Type to search Modrinth — e.g. sodium, iris, lithium.'}
+              {query ? `No results for “${query}”.` : 'Type to search — e.g. sodium, iris, lithium.'}
             </p>
           ) : (
             <>
-              {installError ? <p style={{ fontSize: 12, margin: '0 0 8px' }}>⚠ {installError}</p> : null}
+              <p style={{ fontSize: 12, ...muted, margin: '0 0 8px' }}>
+                {sortedResults.length} result{sortedResults.length === 1 ? '' : 's'} • sorted by{' '}
+                {sort === 'popular' ? 'downloads' : sort === 'newest' ? 'title (A–Z)' : 'relevance'}
+              </p>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
-                {results.map((m) => (
-                  <ModCard key={m.slug} mod={m} installing={installingSlug === m.slug} onInstall={(s) => void handleInstall(s)} />
+                {sortedResults.map((m) => (
+                  <ModCard
+                    key={m.slug}
+                    mod={m}
+                    installing={installingSlug === m.slug}
+                    installed={!!installOk[m.slug]}
+                    installError={installErr[m.slug] ?? null}
+                    onInstall={(s) => void handleInstall(s)}
+                    onSelect={(sel) => setSelected({ slug: sel.slug, title: sel.title, description: sel.description, iconUrl: sel.iconUrl, downloads: sel.downloads, clientSide: sel.clientSide })}
+                  />
                 ))}
               </div>
             </>
@@ -573,22 +708,44 @@ const Mods: React.FC = () => {
             </span>
           ) : null}
         </div>
+        {active ? (
+          <p className="mono" style={{ fontSize: 11, ...muted, margin: '0 0 8px' }}>
+            {active.mcVersion || 'unknown version'} • {active.modLoader}
+            {active.loaderVersion ? ` ${active.loaderVersion}` : ''}
+          </p>
+        ) : null}
 
         {!active ? (
           <p style={{ ...muted, fontSize: 13, margin: 0 }}>Select a profile to see installed mods.</p>
         ) : installedLoading ? (
-          <p style={{ ...muted, fontSize: 13, margin: 0 }}>Loading installed mods…</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }} aria-label="Loading installed mods">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="spinner" aria-hidden="true" />
+              <span style={{ fontSize: 13, ...muted }}>Loading installed mods…</span>
+            </div>
+            {[0, 1, 2].map((i) => (
+              <div key={i} style={{ height: 52, borderRadius: 'var(--radius)', background: 'var(--card-2)', border: '1px solid var(--border)' }} />
+            ))}
+          </div>
         ) : installedError ? (
-          <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12 }}>
+          <div style={errBox}>
             <p style={{ margin: '0 0 8px', fontSize: 13 }}>⚠ {installedError}</p>
             <button type="button" className="btn-ghost" onClick={() => void refreshInstalled(active.id)}>
               Retry
             </button>
           </div>
         ) : installed.length === 0 ? (
-          <p style={{ ...muted, fontSize: 13, margin: 0 }}>No mods installed in this profile yet — install one from the browser above.</p>
+          <div style={{ textAlign: 'center', padding: '20px 12px', border: '1px dashed var(--border-strong)', borderRadius: 'var(--radius)' }}>
+            <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>No mods installed yet</p>
+            <p style={{ margin: '4px 0 0', fontSize: 12, ...muted }}>Browse above and hit Install — mods land in this profile.</p>
+          </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {modActionError ? (
+              <div style={errBox}>
+                <p style={{ margin: 0, fontSize: 12 }}>⚠ {modActionError}</p>
+              </div>
+            ) : null}
             {installed.map((m) => (
               <div
                 key={m.slug}
@@ -600,6 +757,7 @@ const Mods: React.FC = () => {
                   border: '1px solid var(--border)',
                   borderRadius: 'var(--radius)',
                   background: 'var(--card)',
+                  opacity: removingSlug === m.slug ? 0.6 : 1,
                 }}
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -635,6 +793,99 @@ const Mods: React.FC = () => {
           </div>
         )}
       </Card>
+
+      {/* 4 — Detail modal */}
+      {selected ? (
+        <div
+          role="presentation"
+          onClick={() => setSelected(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 100, display: 'grid', placeItems: 'center', padding: 16 }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={selected.title}
+            onClick={(e) => e.stopPropagation()}
+            className="card"
+            style={{ maxWidth: 520, width: '100%', maxHeight: '85vh', overflowY: 'auto', background: 'var(--card)', padding: 20 }}
+          >
+            <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+              {selected.iconUrl ? (
+                <img
+                  src={selected.iconUrl}
+                  alt=""
+                  width={64}
+                  height={64}
+                  style={{ width: 64, height: 64, borderRadius: 14, objectFit: 'cover', flexShrink: 0, border: '1px solid var(--border)' }}
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+              ) : (
+                <div
+                  aria-hidden
+                  style={{
+                    width: 64,
+                    height: 64,
+                    borderRadius: 14,
+                    flexShrink: 0,
+                    display: 'grid',
+                    placeItems: 'center',
+                    fontWeight: 700,
+                    fontSize: 28,
+                    color: 'var(--text)',
+                    background: 'var(--card-2)',
+                    border: '1px solid var(--border)',
+                  }}
+                >
+                  {(selected.title || selected.slug || '?').slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <h3 style={{ margin: 0, fontSize: 17, color: 'var(--text)' }}>{selected.title}</h3>
+                <p className="mono" style={{ margin: '2px 0 0', fontSize: 11, ...muted }}>{selected.slug}</p>
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span className="mono" style={{ fontSize: 12, color: 'var(--text2)' }}>⬇ {formatDownloads(selected.downloads)}</span>
+                  {typeof selected.clientSide === 'string' && selected.clientSide ? (
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: 'var(--green-soft)', color: 'var(--green)' }}>
+                      {selected.clientSide}
+                    </span>
+                  ) : selected.clientSide === true ? (
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 999, background: 'var(--green-soft)', color: 'var(--green)' }}>
+                      Client-side
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--text)', margin: '14px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {selected.description || 'No description available.'}
+            </p>
+            <p style={{ fontSize: 12, ...muted, margin: '12px 0 0' }}>
+              Installs the latest Fabric build for {active ? `“${active.name}” (${active.mcVersion || 'unknown MC version'})` : 'the active profile’s MC version'}.
+            </p>
+            {installErr[selected.slug] ? (
+              <p style={{ fontSize: 12, margin: '8px 0 0', color: 'var(--red)' }}>⚠ {installErr[selected.slug]}</p>
+            ) : null}
+            {installOk[selected.slug] ? (
+              <p style={{ fontSize: 12, margin: '8px 0 0', color: 'var(--green)', fontWeight: 700 }}>✓ Installed</p>
+            ) : null}
+            <div style={{ display: 'flex', gap: 8, marginTop: 14, justifyContent: 'flex-end' }}>
+              <button ref={closeBtnRef} type="button" className="btn-ghost" onClick={() => setSelected(null)}>
+                Close
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={!active || installingSlug === selected.slug}
+                onClick={() => void handleInstall(selected.slug)}
+              >
+                {installingSlug === selected.slug ? 'Installing…' : 'Install'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };

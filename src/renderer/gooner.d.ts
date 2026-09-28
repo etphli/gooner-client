@@ -46,6 +46,7 @@ export interface ModInfo {
 export interface ClientSettings {
   ramMb: number;
   javaPath: string;
+  proxy: string;
   theme: string;
   resolution: { w: number; h: number };
   showHud: boolean;

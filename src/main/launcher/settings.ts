@@ -28,6 +28,8 @@ export interface GoonerSettings {
   activeAccountId: string | null;
   /** Microsoft app (client) id override for device-code auth. null = built-in default. */
   msClientId: string | null;
+  /** Manual HTTP proxy URL (http://host:port) or null = OS proxy / direct. */
+  proxy: string | null;
 }
 
 export function getDefaultDataDir(): string {
@@ -61,6 +63,7 @@ export function defaultSettings(): GoonerSettings {
     discordRpc: true,
     activeAccountId: null,
     msClientId: null,
+    proxy: null,
   };
 }
 
@@ -84,6 +87,18 @@ function sanitize(input: Partial<GoonerSettings>, base: GoonerSettings): GoonerS
   const rawMs = input.msClientId ?? base.msClientId;
   const msClientId =
     typeof rawMs === 'string' && /^[0-9a-f-]{8,64}$/i.test(rawMs.trim()) ? rawMs.trim() : null;
+  const rawProxy = input.proxy ?? base.proxy;
+  let proxy: string | null = null;
+  if (typeof rawProxy === 'string' && rawProxy.trim().length > 0) {
+    try {
+      const u = new URL(rawProxy.trim());
+      if ((u.protocol === 'http:' || u.protocol === 'https:') && u.hostname.length > 0) {
+        proxy = u.toString().replace(/\/+$/, '');
+      }
+    } catch {
+      proxy = null;
+    }
+  }
   return {
     maxRamMb,
     minRamMb,
@@ -98,6 +113,7 @@ function sanitize(input: Partial<GoonerSettings>, base: GoonerSettings): GoonerS
     discordRpc: input.discordRpc ?? base.discordRpc,
     activeAccountId,
     msClientId,
+    proxy,
   };
 }
 

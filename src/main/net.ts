@@ -4,6 +4,12 @@
 // network errors translated into actionable AuthError messages (with the
 // underlying cause code like ENOTFOUND/ECONNREFUSED/CERT preserved).
 // Without this, any connectivity blip surfaces as bare "TypeError: fetch failed".
+//
+// Proxy support (no traffic ever goes through a third-party VPN — that would
+// hand Microsoft/Ely.by credentials to strangers and get logins flagged):
+//   1. Manual proxy from Settings (http://host:port), when set.
+//   2. Otherwise the OS-configured proxy via Electron session.resolveProxy.
+//   3. Otherwise direct.
 import { AuthError } from './auth/types.js';
 
 export interface FetchRetryOpts {
@@ -76,6 +82,87 @@ function combineSignals(user?: AbortSignal, timeoutMs?: number): { signal: Abort
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+// ---- proxy resolution (cached) ----
+
+interface ProxyCacheEntry {
+  at: number;
+  proxyUrl: string | null;
+}
+const proxyCache = new Map<string, ProxyCacheEntry>();
+const PROXY_TTL_MS = 5 * 60_000;
+
+function parseProxyResult(resolved: string): string | null {
+  // Electron/Chromium format: "PROXY host:port; HTTPS host:port; DIRECT"
+  for (const part of resolved.split(';')) {
+    const t = part.trim().split(/\s+/);
+    if (t.length === 2 && (t[0] === 'PROXY' || t[0] === 'HTTPS')) {
+      const host = t[1];
+      if (/^[\w.-]+:\d+$/.test(host)) return `http://${host}`;
+    }
+    if (t[0] === 'DIRECT') return null;
+  }
+  return null;
+}
+
+async function readManualProxy(): Promise<string | null> {
+  try {
+    const { loadSettings } = await import('./launcher/settings.js');
+    const s = await loadSettings();
+    const p = (s as { proxy?: string | null }).proxy;
+    if (typeof p === 'string' && p.trim().length > 0) return p.trim();
+  } catch {
+    /* settings unreadable — fall through to OS proxy */
+  }
+  return null;
+}
+
+async function resolveProxyFor(url: string): Promise<string | null> {
+  let host = '';
+  try {
+    host = new URL(url).host;
+  } catch {
+    return null;
+  }
+  const hit = proxyCache.get(host);
+  if (hit && Date.now() - hit.at < PROXY_TTL_MS) return hit.proxyUrl;
+  let proxyUrl: string | null = null;
+  try {
+    proxyUrl = await readManualProxy();
+    if (!proxyUrl) {
+      const { session } = await import('electron');
+      const resolved: string = await session.defaultSession.resolveProxy(url);
+      proxyUrl = parseProxyResult(resolved);
+    }
+  } catch {
+    proxyUrl = null;
+  }
+  proxyCache.set(host, { at: Date.now(), proxyUrl });
+  return proxyUrl;
+}
+
+type DispatcherLike = unknown;
+
+let proxyAgentCtor: (new (proxyUrl: string) => DispatcherLike) | null | undefined;
+async function dispatcherFor(url: string): Promise<DispatcherLike | undefined> {
+  let proxyUrl: string | null = null;
+  try {
+    proxyUrl = await resolveProxyFor(url);
+  } catch {
+    return undefined;
+  }
+  if (!proxyUrl) return undefined;
+  try {
+    if (proxyAgentCtor === undefined) {
+      const mod = (await import('undici')) as { ProxyAgent?: new (u: string) => DispatcherLike };
+      proxyAgentCtor = mod.ProxyAgent ?? null;
+    }
+    if (!proxyAgentCtor) return undefined;
+    return new proxyAgentCtor(proxyUrl);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * fetch with timeout + retries. Throws AuthError NETWORK_ERROR with a
  * human-actionable message (never a bare TypeError).
@@ -84,11 +171,16 @@ export async function fetchWithRetry(url: string, init: RequestInit = {}, opts: 
   const { timeoutMs = 20000, retries = 0, label, signal: userSignal } = opts;
   const tag = label ?? hostOf(url);
   let last: unknown = null;
+  const dispatcher = await dispatcherFor(url);
   for (let attempt = 0; ; attempt++) {
     if (userSignal?.aborted) throw new AuthError('ABORTED', `${tag}: cancelled.`);
     const { signal, cancel } = combineSignals(userSignal, timeoutMs);
     try {
-      return await fetch(url, { ...init, signal: signal ?? undefined });
+      return await fetch(url, {
+        ...init,
+        signal: signal ?? undefined,
+        ...(dispatcher ? { dispatcher } : {}),
+      } as RequestInit);
     } catch (e) {
       last = e;
       if ((e as Error)?.name === 'AbortError' && userSignal?.aborted) {

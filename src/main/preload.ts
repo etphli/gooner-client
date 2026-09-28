@@ -64,6 +64,7 @@ export interface ModInfo {
 export interface ClientSettings {
   ramMb: number;
   javaPath: string;
+  proxy: string;
   theme: string;
   resolution: { w: number; h: number };
   showHud: boolean;
@@ -196,10 +197,11 @@ const gooner = {
   getSettings: (): Promise<ClientSettings> =>
     ipcRenderer
       .invoke('launcher:settings:get')
-      .then((s: { theme: string; maxRamMb: number; javaPath: string | null; closeOnLaunch?: boolean }) => ({
+      .then((s: { theme: string; maxRamMb: number; javaPath: string | null; closeOnLaunch?: boolean; proxy?: string | null }) => ({
         theme: s.theme === 'gooner' ? 'dark' : s.theme,
         ramMb: s.maxRamMb,
         javaPath: s.javaPath ?? '',
+        proxy: s.proxy ?? '',
         resolution: { w: 1280, h: 720 },
         showHud: true,
         closeOnLaunch: Boolean(s.closeOnLaunch ?? false),
@@ -212,6 +214,7 @@ const gooner = {
         maxRamMb: s.ramMb,
         javaPath: s.javaPath,
         closeOnLaunch: s.closeOnLaunch,
+        proxy: (s as { proxy?: string }).proxy ?? '',
       })
       .then(() => undefined),
   browseJava: (): Promise<string | null> => ipcRenderer.invoke('gooner:pick-directory'),
