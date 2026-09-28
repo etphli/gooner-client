@@ -1,0 +1,29 @@
+{
+  "_license": "SPDX-License-Identifier: GPL-3.0-only",
+  "currency": "gooner_coins",
+  "assetBase": "https://example.com/assets/gooner-client",
+  "categories": {
+    "capes": [
+      { "id": "evergreen_2024", "name": "Evergreen Cape", "price": 0, "rarity": "common" },
+      { "id": "gooner_gold", "name": "Gooner Gold", "price": 500, "rarity": "rare" }
+    ],
+    "wings": [
+      { "id": "ender_dragon", "name": "Ender Wings", "price": 1200, "rarity": "epic", "animated": true }
+    ],
+    "hats": [
+      { "id": "top_hat", "name": "Top Hat", "price": 300, "rarity": "common", "slot": "head" }
+    ],
+    "boots": [
+      { "id": "slime_boots", "name": "Slime Boots", "price": 400, "rarity": "rare", "slot": "feet" }
+    ],
+    "backs": [
+      { "id": "backpack_evergreen", "name": "Evergreen Pack", "price": 600, "rarity": "rare", "slot": "back" }
+    ],
+    "shoulders": [
+      { "id": "parrot_perch", "name": "Parrot Perch", "price": 800, "rarity": "epic", "slot": "shoulder" }
+    ],
+    "auras": [
+      { "id": "soul_flame", "name": "Soul Flame Aura", "price": 1500, "rarity": "legendary", "animated": true }
+    ]
+  }
+}

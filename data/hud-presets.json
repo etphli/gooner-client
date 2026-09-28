@@ -1,0 +1,25 @@
+{
+  "_license": "SPDX-License-Identifier: GPL-3.0-only",
+  "_attribution": "HUD schema inspired by Polyfrost OneConfig HUD / EvergreenHUD concepts.",
+  "oneConfigDefaults": { "theme": "evergreen_dark", "hudScale": 1.0, "showInF3": true, "editModeKey": "R_SHIFT" },
+  "themes": {
+    "light": { "bg": "#F5F5F5E6", "fg": "#1A1A1A", "accent": "#2E7D32", "rounding": 8 },
+    "dark": { "bg": "#121212E6", "fg": "#FFFFFF", "accent": "#66BB6A", "rounding": 8 }
+  },
+  "presets": {
+    "EvergreenHUD": {
+      "widgets": [
+        { "type": "fps", "anchor": "top_left", "x": 8, "y": 8, "scale": 1.0, "enabled": true },
+        { "type": "cps", "anchor": "top_left", "x": 8, "y": 28, "scale": 1.0, "enabled": true },
+        { "type": "ping", "anchor": "top_right", "x": -8, "y": 8, "scale": 1.0, "enabled": true },
+        { "type": "coordinates", "anchor": "bottom_left", "x": 8, "y": -8, "scale": 1.0, "enabled": true }
+      ]
+    },
+    "VanillaHUD": {
+      "widgets": [
+        { "type": "clock", "anchor": "top_center", "x": 0, "y": 4, "scale": 1.0, "enabled": true },
+        { "type": "armor", "anchor": "vanilla", "x": 0, "y": 0, "scale": 1.0, "enabled": true }
+      ]
+    }
+  }
+}

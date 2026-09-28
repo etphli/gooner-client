@@ -1,0 +1,77 @@
+appId: org.gooner.client
+productName: Gooner Client
+copyright: Copyright © 2026 Gooner Client Contributors
+
+asar: true
+directories:
+  output: release
+  buildResources: build
+
+extraMetadata:
+  main: dist-electron/main.js
+
+files:
+  - dist/**
+  - dist-electron/**
+  - package.json
+  - data/**
+
+protocols:
+  - name: Gooner Client
+    schemes:
+      - gooner
+
+mac:
+  category: public.app-category.games
+  minimumSystemVersion: 13.0.0
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  artifactName: Gooner-Client-${version}-mac-${arch}.${ext}
+  darkModeSupport: true
+
+dmg:
+  window:
+    width: 540
+    height: 380
+    x: 400
+    y: 100
+  iconSize: 100
+  backgroundColor: '#0e0f13'
+  title: ${productName} ${version}
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: Gooner-Client-${version}-win-${arch}.${ext}
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Gooner Client
+  deleteAppDataOnUninstall: false
+
+linux:
+  category: Game
+  maintainer: Gooner Client Contributors
+  synopsis: Gooner Client Minecraft Launcher
+  description: Gooner Client - open-source Minecraft launcher for macOS (OneClient parity minus World Hosting)
+  target:
+    - AppImage
+  artifactName: Gooner-Client-${version}-linux-${arch}.${ext}
+
+publish:
+  provider: github
+  releaseType: draft
