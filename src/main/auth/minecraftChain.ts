@@ -7,42 +7,30 @@ import {
   type MinecraftEntitlements, type MinecraftProfile, type MicrosoftTokens
 } from './types.js';
 
+import { fetchJson } from '../net.js';
+
 const UA = 'GoonerClient/1.0 (+macOS)';
 
 async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Promise<{ status: number; json: T }> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': UA },
-    body: JSON.stringify(body),
-    signal
-  });
-  const text = await res.text();
-  let json: T;
-  try { json = (text ? JSON.parse(text) : {}) as T; }
-  catch (e) { throw new AuthError('NETWORK_ERROR', `Invalid JSON from ${url} (HTTP ${res.status})`, { status: res.status, cause: e }); }
-  if (!res.ok) {
-    const err = new AuthError('NETWORK_ERROR', `HTTP ${res.status} from ${url}`, { status: res.status, cause: json });
-    (err as unknown as { payload: unknown }).payload = json;
-    throw err;
-  }
-  return { status: res.status, json };
+  return fetchJson<T>(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': UA },
+      body: JSON.stringify(body),
+    },
+    { label: 'Xbox/Minecraft auth', timeoutMs: 20000, retries: 2, signal },
+  );
 }
 
 async function getJson<T>(url: string, bearer: string, signal?: AbortSignal): Promise<{ status: number; json: T }> {
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${bearer}`, Accept: 'application/json', 'User-Agent': UA },
-    signal
-  });
-  const text = await res.text();
-  let json: T;
-  try { json = (text ? JSON.parse(text) : {}) as T; }
-  catch (e) { throw new AuthError('NETWORK_ERROR', `Invalid JSON from ${url} (HTTP ${res.status})`, { status: res.status, cause: e }); }
-  if (!res.ok) {
-    const err = new AuthError('NETWORK_ERROR', `HTTP ${res.status} from ${url}`, { status: res.status, cause: json });
-    (err as unknown as { payload: unknown }).payload = json;
-    throw err;
-  }
-  return { status: res.status, json };
+  return fetchJson<T>(
+    url,
+    {
+      headers: { Authorization: `Bearer ${bearer}`, Accept: 'application/json', 'User-Agent': UA },
+    },
+    { label: 'Minecraft services', timeoutMs: 20000, retries: 2, signal },
+  );
 }
 
 export async function xboxLiveAuthenticate(msAccessToken: string, signal?: AbortSignal) {

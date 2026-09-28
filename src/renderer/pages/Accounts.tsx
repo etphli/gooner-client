@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Card, PageHeader } from '../components/ui';
 import { Guide, friendlyAuthError, isValidOfflineName } from '../components/authHelp';
 
-type Method = 'device' | 'offline' | 'elyby' | 'custom' | null;
+type Method = 'device' | 'offline' | 'elyby' | null;
 
 interface AccountLike {
   id: string;
@@ -21,7 +21,6 @@ interface ExtGooner {
   cancelDeviceFlow?: (id?: string) => Promise<unknown>;
   signInOffline?: (u: string) => Promise<unknown>;
   signInElyby?: (u: string, p: string) => Promise<unknown>;
-  signInCustom?: (s: string, u: string, p: string) => Promise<unknown>;
   openExternal?: (u: string) => Promise<unknown>;
 }
 
@@ -53,7 +52,6 @@ const Accounts: React.FC<{ onAccountsChange?: () => void }> = ({ onAccountsChang
   const [offlineName, setOfflineName] = useState('');
   const [elyUser, setElyUser] = useState('');
   const [elyPass, setElyPass] = useState('');
-  const [custom, setCustom] = useState({ server: '', user: '', pass: '' });
   const [busy, setBusy] = useState(false);
   const timer = useRef<number | null>(null);
   const pollRef = useRef(false);
@@ -182,21 +180,6 @@ const Accounts: React.FC<{ onAccountsChange?: () => void }> = ({ onAccountsChang
     }
   };
 
-  const doCustom = async () => {
-    if (!custom.server.trim() || !custom.user.trim() || !custom.pass || busy) return;
-    setBusy(true);
-    try {
-      await ext()?.signInCustom?.(custom.server.trim(), custom.user.trim(), custom.pass);
-      setStatus(`Custom server "${custom.server.trim()}" connected ✓`);
-      setCustom({ server: custom.server, user: '', pass: '' });
-      await refresh(); notify();
-    } catch (e) {
-      setStatus(friendlyAuthError(e, 'Custom server sign-in failed'));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const mmss = `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`;
   const copy = () => { if (userCode) void navigator.clipboard?.writeText(userCode); };
   const btn: React.CSSProperties = { display: 'flex', gap: 10, alignItems: 'center', textAlign: 'left', width: '100%' };
@@ -204,7 +187,7 @@ const Accounts: React.FC<{ onAccountsChange?: () => void }> = ({ onAccountsChang
 
   return (
     <div className="page">
-      <PageHeader title="Accounts" sub="Four ways to sign in. Switch or remove anytime." actions={<span className="pill">{accounts.length} connected</span>} />
+      <PageHeader title="Accounts" sub="Three ways to sign in. Switch or remove anytime." actions={<span className="pill">{accounts.length} connected</span>} />
 
       <Card>
         <strong>Connected accounts</strong>
@@ -236,7 +219,6 @@ const Accounts: React.FC<{ onAccountsChange?: () => void }> = ({ onAccountsChang
         <Card style={{ padding: 10 }}><button type="button" className="btn-ghost" style={{ ...btn, border: 0, background: 'transparent' }} disabled={busy} onClick={() => void startDevice()}><span className="auth-ico">🔗</span><span><b>Microsoft Device Link</b><br /><span className="tiny muted">Code + microsoft.com/link for another device</span></span></button></Card>
         <Card style={{ padding: 10 }}><button type="button" className="btn-ghost" style={{ ...btn, border: 0, background: 'transparent' }} onClick={() => setMethod(method === 'offline' ? null : 'offline')}><span className="auth-ico">⛏️</span><span><b>Offline</b><br /><span className="tiny muted">Local profile, instant, no Microsoft</span></span></button></Card>
         <Card style={{ padding: 10 }}><button type="button" className="btn-ghost" style={{ ...btn, border: 0, background: 'transparent' }} onClick={() => setMethod(method === 'elyby' ? null : 'elyby')}><span className="auth-ico">🪪</span><span><b>Ely.by</b><br /><span className="tiny muted">Free account with skins</span></span></button></Card>
-        <Card style={{ padding: 10 }}><button type="button" className="btn-ghost" style={{ ...btn, border: 0, background: 'transparent' }} onClick={() => setMethod(method === 'custom' ? null : 'custom')}><span className="auth-ico">🛠️</span><span><b>Custom server</b><br /><span className="tiny muted">Private auth server</span></span></button></Card>
       </div>
 
       {status && <div className="status-line" style={{ marginTop: 12 }}>{status}</div>}
@@ -277,18 +259,6 @@ const Accounts: React.FC<{ onAccountsChange?: () => void }> = ({ onAccountsChang
             <button type="button" className="btn-primary" disabled={!elyUser.trim() || !elyPass || busy} onClick={() => void doElyby()}>Sign in with Ely.by</button>
             <button type="button" className="btn-ghost btn-sm" onClick={() => { ext()?.openExternal?.('https://account.ely.by/register')?.catch(() => undefined); }}>Create free account</button>
           </div>
-        </Card>
-      )}
-      {method === 'custom' && (
-        <Card style={{ marginTop: 12 }}>
-          <strong>Custom auth server</strong>
-          <div style={{ marginTop: 8 }}><Guide method="custom" /></div>
-          <input className="input mono" style={{ marginTop: 8 }} placeholder="https://auth.example.com" value={custom.server} onChange={(e) => setCustom({ ...custom, server: e.target.value })} aria-label="Auth server URL" />
-          <div className="row" style={{ marginTop: 8 }}>
-            <input className="input" placeholder="username" value={custom.user} onChange={(e) => setCustom({ ...custom, user: e.target.value })} aria-label="Custom username" />
-            <input className="input" type="password" placeholder="password" value={custom.pass} onChange={(e) => setCustom({ ...custom, pass: e.target.value })} aria-label="Custom password" />
-          </div>
-          <button type="button" className="btn-primary" style={{ marginTop: 8 }} disabled={!custom.server.trim() || !custom.user.trim() || !custom.pass || busy} onClick={() => void doCustom()}>Connect</button>
         </Card>
       )}
     </div>

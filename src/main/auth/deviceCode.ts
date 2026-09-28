@@ -3,12 +3,22 @@
 import { randomUUID } from 'node:crypto';
 import { AuthError, DEFAULT_MS_CLIENT_ID, DEFAULT_MS_SCOPES, MS_DEVICE_CODE_URL, MS_TOKEN_URL, addUuidDashes, type AuthAccount, type DeviceCodeInfo, type MicrosoftTokens } from './types.js';
 import { microsoftToMinecraft } from './minecraftChain.js';
+import { fetchJson, fetchWithRetry } from '../net.js';
 
 export async function requestDeviceCode(clientId = DEFAULT_MS_CLIENT_ID, scopes: readonly string[] = DEFAULT_MS_SCOPES, signal?: AbortSignal): Promise<DeviceCodeInfo> {
   const params = new URLSearchParams({ client_id: clientId, scope: [...scopes].join(' ') });
-  const res = await fetch(MS_DEVICE_CODE_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, body: params.toString(), signal });
-  const json = (await res.json()) as { user_code?: string; device_code?: string; verification_uri?: string; verification_uri_complete?: string; expires_in?: number; interval?: number; message?: string; error_description?: string; error?: string };
-  if (!res.ok || !json.device_code || !json.user_code) throw new AuthError('MICROSOFT_TOKEN_EXCHANGE_FAILED', `devicecode failed: ${json.error_description ?? json.error ?? `HTTP ${res.status}`}`, { status: res.status, cause: json });
+  const { json } = await fetchJson<{ user_code?: string; device_code?: string; verification_uri?: string; verification_uri_complete?: string; expires_in?: number; interval?: number; message?: string; error_description?: string; error?: string }>(
+    MS_DEVICE_CODE_URL,
+    { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, body: params.toString() },
+    { label: 'Microsoft sign-in', timeoutMs: 20000, retries: 2, signal },
+  ).catch((e: unknown) => {
+    if (e instanceof AuthError && e.code === 'MICROSOFT_TOKEN_EXCHANGE_FAILED') throw e;
+    if (e instanceof AuthError) {
+      throw new AuthError('MICROSOFT_TOKEN_EXCHANGE_FAILED', `Could not reach Microsoft sign-in (${e.message})`, { status: e.status, cause: e.cause });
+    }
+    throw e;
+  });
+  if (!json.device_code || !json.user_code) throw new AuthError('MICROSOFT_TOKEN_EXCHANGE_FAILED', `devicecode failed: ${json.error_description ?? json.error ?? 'unknown response'}`);
   return { userCode: json.user_code, deviceCode: json.device_code, verificationUri: json.verification_uri ?? 'https://www.microsoft.com/link', verificationUriComplete: json.verification_uri_complete, expiresIn: json.expires_in ?? 900, interval: json.interval ?? 5, message: json.message };
 }
 
@@ -31,10 +41,16 @@ export async function pollDeviceCodeForToken(info: DeviceCodeInfo, opts: { clien
     const params = new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:device_code', client_id: clientId, device_code: info.deviceCode });
     let raw: { access_token?: string; refresh_token?: string; expires_in?: number; token_type?: string; scope?: string; error?: string; error_description?: string };
     try {
-      const res = await fetch(MS_TOKEN_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, body: params.toString(), signal: opts.signal });
+      // No retries here — the loop itself retries every interval until expiry.
+      const res = await fetchWithRetry(
+        MS_TOKEN_URL,
+        { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, body: params.toString() },
+        { label: 'Microsoft sign-in', timeoutMs: 25000, retries: 0, signal: opts.signal },
+      );
       raw = (await res.json()) as typeof raw;
     } catch (e) {
-      if ((e as Error)?.name === 'AbortError') throw new AuthError('ABORTED', 'Device polling aborted.');
+      if (e instanceof AuthError && e.code === 'ABORTED') throw e;
+      // Transient network failure mid-poll: wait out the interval and try again.
       await sleep(intervalSec * 1000, opts.signal);
       continue;
     }

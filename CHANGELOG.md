@@ -3,12 +3,15 @@ All notable changes documented. Format based on Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
-## [0.2.1] - 2026-09-28
+## [0.2.2] - 2026-09-28
 ### Fixed
 - Microsoft Device Link: working client ID (verified live) + overridable in Settings.
-- Offline + Ely.by error handling; per-method in-app guides.
+- Network hardening: timeouts, retries, actionable errors (no more bare "fetch failed") across auth, Java, Modrinth.
+- Login rewrite: per-method guides, busy guards, cancel, no demo codes, offline validation.
+- Onboarding: version dropdown, Java skip option.
+- DMG: drag-cue arrow in installer art.
 ### Removed
-- Microsoft Browser sign-in.
+- Microsoft Browser + Custom server sign-in.
 
 ## [0.2.0] - 2026-09-28
 ### Added

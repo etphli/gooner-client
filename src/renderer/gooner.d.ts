@@ -94,7 +94,6 @@ declare global {
       getMsClientId(): Promise<string>;
       setMsClientId(id: string): Promise<string>;
       signInElyby(username: string, password: string): Promise<unknown>;
-      signInCustom(server: string, username: string, password: string): Promise<unknown>;
       removeAccount(id: string): Promise<void>;
       getInstances(): Promise<Instance[]>;
       createInstance(input: CreateInstanceInput): Promise<Instance>;

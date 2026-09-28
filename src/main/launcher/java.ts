@@ -137,16 +137,30 @@ export function buildTemurinUrl(major: JavaMajor): string {
 
 async function downloadToFile(url: string, dest: string): Promise<void> {
   await fs.mkdir(path.dirname(dest), { recursive: true });
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'GoonerClient/1.0 (+macOS)' },
-    redirect: 'follow',
-  });
-  if (!res.ok || !res.body) {
-    throw new Error(`Temurin download failed: ${res.status} ${res.statusText} (${url})`);
+  // Long timeout: only the connection setup is bounded per attempt — the
+  // ~200MB stream itself takes minutes. Two attempts before surfacing.
+  const { fetchWithRetry } = await import('../net.js');
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetchWithRetry(
+        url,
+        { headers: { 'User-Agent': 'GoonerClient/1.0 (+macOS)' }, redirect: 'follow' },
+        { label: 'Java download', timeoutMs: 10 * 60_000, retries: 0 },
+      );
+      if (!res.ok || !res.body) {
+        throw new Error(`Temurin download failed: ${res.status} ${res.statusText} (${url})`);
+      }
+      // Stream to disk (handles ~200MB JDKs without buffering).
+      const nodeStream = res.body as unknown as NodeJS.ReadableStream;
+      await pipeline(nodeStream as never, createWriteStream(dest) as never);
+      return;
+    } catch (e) {
+      lastErr = e;
+      await fs.rm(dest, { force: true }).catch(() => undefined);
+    }
   }
-  // Stream to disk (handles ~200MB JDKs without buffering).
-  const nodeStream = res.body as unknown as NodeJS.ReadableStream;
-  await pipeline(nodeStream as never, createWriteStream(dest) as never);
+  throw lastErr instanceof Error ? lastErr : new Error(`Java download failed: ${String(lastErr)}`);
 }
 
 function extractArchive(archive: string, destDir: string): Promise<void> {

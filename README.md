@@ -68,7 +68,7 @@ shasum -a 256 -c SHA256SUMS.txt
 # expect: Gooner-Client-*.dmg: OK
 ```
 
-## Sign in — 4 ways
+## Sign in — 3 ways
 
 Tokens live in app storage, passwords are never stored. Each method explains itself in the app after you tap it.
 
@@ -79,7 +79,6 @@ Tokens live in app storage, passwords are never stored. Each method explains its
    2. In the launcher: `Accounts → Ely.by`, enter your Ely.by email (or nickname) + password.
    3. Press Sign in. Your Ely skin shows on Ely-enabled servers; everywhere else you appear default/offline.
    4. Wrong password? Reset it on the Ely.by site, then try again. The launcher only keeps the session token, never your password.
-4. **Custom Yggdrasil** — `Accounts → Custom`, paste server URL (`https://…`, http only for localhost) + that server's credentials. Launches with `-javaagent:authlib-injector.jar=URL`. Only use servers you trust.
 
 Advanced: Settings → Microsoft Client ID lets you use your own Azure app registration instead of the built-in one.
 

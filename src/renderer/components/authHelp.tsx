@@ -6,7 +6,7 @@ export interface MethodGuide {
   note: string;
 }
 
-export const METHOD_GUIDES: Record<'device' | 'offline' | 'elyby' | 'custom', MethodGuide> = {
+export const METHOD_GUIDES: Record<'device' | 'offline' | 'elyby', MethodGuide> = {
   device: {
     title: 'What happens next',
     steps: [
@@ -34,18 +34,9 @@ export const METHOD_GUIDES: Record<'device' | 'offline' | 'elyby' | 'custom', Me
     ],
     note: 'We never store your password, only the session token. Wrong password? Reset it on the Ely.by site.',
   },
-  custom: {
-    title: 'What happens next',
-    steps: [
-      'Enter your private server auth URL (must be https:// — http works for localhost only).',
-      'Enter the username and password for THAT server.',
-      'The game launches with authlib-injector pointed at your server.',
-    ],
-    note: 'Only use servers you trust — the server sees your password.',
-  },
 };
 
-export const Guide: React.FC<{ method: 'device' | 'offline' | 'elyby' | 'custom' }> = ({ method }) => {
+export const Guide: React.FC<{ method: 'device' | 'offline' | 'elyby' }> = ({ method }) => {
   const g = METHOD_GUIDES[method];
   return (
     <div style={{ textAlign: 'left', marginTop: 4 }}>

@@ -3,10 +3,10 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fetchWithRetry } from './net.js';
 
 const MODRINTH_API = 'https://api.modrinth.com/v2';
 const UA = { 'User-Agent': 'GoonerClient/1.0 (+macOS; contact: gooner-client)' } as const;
-const TIMEOUT_MS = 15000;
 
 /** Hard blocklist — world-host / e4mc must never be installed. */
 export const BLOCKED_MODS = new Set<string>(['world-host', 'e4mc']);
@@ -37,16 +37,6 @@ export interface ModrinthVersion {
   files: ModrinthVersionFile[];
 }
 
-async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = TIMEOUT_MS): Promise<Response> {
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: ctl.signal });
-  } finally {
-    clearTimeout(t);
-  }
-}
-
 /**
  * Search Modrinth for Fabric mods (limit 25).
  * Facets: project_type:mod + loaders:fabric (+ versions:<mcVersion> when given).
@@ -60,7 +50,7 @@ export async function searchMods(query: string, mcVersion?: string): Promise<Mod
   const url =
     `${MODRINTH_API}/search?query=${encodeURIComponent(q)}` +
     `&limit=25&facets=${encodeURIComponent(JSON.stringify(facets))}`;
-  const res = await fetchWithTimeout(url, { headers: UA }, TIMEOUT_MS);
+  const res = await fetchWithRetry(url, { headers: UA }, { label: 'Modrinth search', timeoutMs: 15000, retries: 2 });
   if (!res.ok) throw new Error(`Modrinth search failed: ${res.status}`);
   const data = (await res.json()) as {
     hits?: Array<{
@@ -97,7 +87,7 @@ export async function installModFile(
     `${MODRINTH_API}/project/${encodeURIComponent(slug)}/version` +
     `?loaders=${encodeURIComponent(JSON.stringify(['fabric']))}` +
     `&game_versions=${encodeURIComponent(JSON.stringify([mc]))}`;
-  const res = await fetchWithTimeout(url, { headers: UA }, TIMEOUT_MS);
+  const res = await fetchWithRetry(url, { headers: UA }, { label: 'Modrinth', timeoutMs: 15000, retries: 2 });
   if (!res.ok) throw new Error(`Modrinth ${slug}: ${res.status}`);
   const versions = (await res.json()) as ModrinthVersion[];
   const ver = versions[0];
@@ -107,7 +97,7 @@ export async function installModFile(
   if (!fileMeta) throw new Error(`No files for ${slug}`);
   const expected = fileMeta.hashes?.sha512;
   if (!expected) throw new Error(`Missing sha512 for ${slug}`);
-  const dl = await fetchWithTimeout(fileMeta.url, { headers: UA }, TIMEOUT_MS);
+  const dl = await fetchWithRetry(fileMeta.url, { headers: UA }, { label: 'Mod download', timeoutMs: 60000, retries: 2 });
   if (!dl.ok || !dl.body) throw new Error(`mod download failed ${dl.status}: ${fileMeta.url}`);
   const buf = Buffer.from(await dl.arrayBuffer());
   const actual = createHash('sha512').update(buf).digest('hex');

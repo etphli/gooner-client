@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ProgressBar } from '../components/ui';
 import { Guide, friendlyAuthError, isValidOfflineName } from '../components/authHelp';
 
-type Method = 'device' | 'offline' | 'elyby' | 'custom' | null;
+type Method = 'device' | 'offline' | 'elyby' | null;
 type Step = 'welcome' | 'auth' | 'java' | 'done';
 
 interface ExtGooner {
@@ -12,8 +12,8 @@ interface ExtGooner {
   cancelDeviceFlow?: (id?: string) => Promise<unknown>;
   signInOffline?: (u: string) => Promise<unknown>;
   signInElyby?: (u: string, p: string) => Promise<unknown>;
-  signInCustom?: (s: string, u: string, p: string) => Promise<unknown>;
   ensureJava?: (mcVersion?: string) => Promise<unknown>;
+  getVersions?: (filter?: string) => Promise<unknown>;
   onJavaProgress?: (cb: (p: { percent?: number; task?: string; message?: string }) => void) => (() => void) | void;
   openExternal?: (u: string) => Promise<unknown>;
 }
@@ -46,11 +46,11 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
   const [offlineName, setOfflineName] = useState('');
   const [elyUser, setElyUser] = useState('');
   const [elyPass, setElyPass] = useState('');
-  const [custom, setCustom] = useState({ server: '', user: '', pass: '' });
   const [busy, setBusy] = useState(false);
 
   // java
   const [mcVersion, setMcVersion] = useState('1.21.1');
+  const [versions, setVersions] = useState<string[]>(['1.21.1']);
   const [javaPct, setJavaPct] = useState(0);
   const [javaTask, setJavaTask] = useState('Not started');
   const [javaReady, setJavaReady] = useState(false);
@@ -68,6 +68,21 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
   };
 
   useEffect(() => { void refreshCount(); }, []);
+
+  useEffect(() => {
+    if (step !== 'java') return;
+    (window.gooner as unknown as ExtGooner | undefined)?.getVersions?.('release')
+      ?.then((v) => {
+        if (Array.isArray(v) && v.length > 0) {
+          const list = (v as unknown[]).filter((x): x is string => typeof x === 'string');
+          if (list.length > 0) {
+            setVersions(list);
+            setMcVersion((cur) => (list.includes(cur) ? cur : list[0]));
+          }
+        }
+      })
+      ?.catch(() => undefined);
+  }, [step]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -160,19 +175,6 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
     }
   };
 
-  const doCustom = async () => {
-    if (!custom.server.trim() || !custom.user.trim() || !custom.pass || busy) return;
-    setBusy(true);
-    try {
-      const acc = await (window.gooner as unknown as ExtGooner | undefined)?.signInCustom?.(custom.server.trim(), custom.user.trim(), custom.pass);
-      await afterAuth(acc ?? { minecraftUsername: custom.user.trim() }, custom.user.trim());
-    } catch (e) {
-      setStatus(friendlyAuthError(e, 'Custom server sign-in failed'));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const ensureJavaStep = async () => {
     setJavaBusy(true);
     setJavaTask(`Preparing Java for ${mcVersion}…`);
@@ -235,7 +237,7 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
         {step === 'welcome' && (
           <div>
             <p className="muted" style={{ margin: '0 0 14px' }}>
-              A clean, light-first Minecraft launcher. Sign in with Microsoft, Ely.by, a custom server, or offline — then we provision the right Java automatically.
+              A clean, light-first Minecraft launcher. Sign in with Microsoft, Ely.by, or offline — then we provision the right Java automatically.
             </p>
             <div className="row">
               <button type="button" className="btn-primary" onClick={() => setStep('auth')}>Get started</button>
@@ -264,12 +266,6 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
                 <button type="button" className="btn-ghost btn-block" style={{ ...optBtn, border: 0, background: 'transparent', padding: 4 }} onClick={() => setMethod('elyby')}>
                   <span className="auth-ico">🪪</span>
                   <span><b>Ely.by</b><br /><span className="tiny muted">Email + password</span></span>
-                </button>
-              </div>
-              <div className="card" style={{ padding: 10 }}>
-                <button type="button" className="btn-ghost btn-block" style={{ ...optBtn, border: 0, background: 'transparent', padding: 4 }} onClick={() => setMethod('custom')}>
-                  <span className="auth-ico">🛠️</span>
-                  <span><b>Custom server</b><br /><span className="tiny muted">Private Yggdrasil + authlib-injector</span></span>
                 </button>
               </div>
             </div>
@@ -314,18 +310,6 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
                 </div>
               </div>
             )}
-            {method === 'custom' && (
-              <div className="card" style={{ marginTop: 12 }}>
-                <b>Custom auth server</b>
-                <div style={{ marginTop: 8 }}><Guide method="custom" /></div>
-                <input className="input mono" style={{ marginTop: 8 }} placeholder="https://auth.example.com" value={custom.server} onChange={(e) => setCustom({ ...custom, server: e.target.value })} aria-label="Auth server URL" />
-                <div className="row" style={{ marginTop: 8 }}>
-                  <input className="input" placeholder="username" value={custom.user} onChange={(e) => setCustom({ ...custom, user: e.target.value })} aria-label="Custom username" />
-                  <input className="input" type="password" placeholder="password" value={custom.pass} onChange={(e) => setCustom({ ...custom, pass: e.target.value })} aria-label="Custom password" />
-                </div>
-                <button type="button" className="btn-primary" style={{ marginTop: 8 }} disabled={!custom.server.trim() || !custom.user.trim() || !custom.pass || busy} onClick={() => void doCustom()}>Connect</button>
-              </div>
-            )}
 
             <div className="row" style={{ marginTop: 14, justifyContent: 'space-between' }}>
               <button type="button" className="btn-ghost" onClick={() => setStep('welcome')}>← Back</button>
@@ -337,13 +321,15 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
           </div>
         )}
 
-        {step === 'java' && (
+            {step === 'java' && (
           <div>
             <p className="muted" style={{ margin: '0 0 10px' }}>We provision Eclipse Temurin for your Minecraft version. One click, cached afterwards.</p>
             <div className="field">
               <label className="label" htmlFor="ob-mc">Minecraft version</label>
               <div className="row">
-                <input id="ob-mc" className="input mono" value={mcVersion} onChange={(e) => setMcVersion(e.target.value)} placeholder="1.21.1" />
+                <select id="ob-mc" className="select" value={mcVersion} onChange={(e) => setMcVersion(e.target.value)} aria-label="Minecraft version">
+                  {versions.map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
                 <button type="button" className="btn-primary" disabled={javaBusy} onClick={() => void ensureJavaStep()}>
                   {javaBusy ? 'Setting up…' : javaReady ? 'Re-check' : 'Set up Java'}
                 </button>
@@ -359,9 +345,12 @@ const Onboarding: React.FC<{ onDone: () => void }> = ({ onDone }) => {
             {status && <div className="status-line" style={{ marginTop: 12 }}>{status}</div>}
             <div className="row" style={{ marginTop: 14, justifyContent: 'space-between' }}>
               <button type="button" className="btn-ghost" onClick={() => setStep('auth')}>← Accounts</button>
-              <button type="button" className="btn-primary" disabled={!javaReady} onClick={() => setStep('done')}>Continue →</button>
+              <div className="row">
+                <button type="button" className="btn-ghost" onClick={() => setStep('done')}>Skip for now</button>
+                <button type="button" className="btn-primary" disabled={!javaReady} onClick={() => setStep('done')}>Continue →</button>
+              </div>
             </div>
-            {!javaReady && <div className="tiny muted" style={{ marginTop: 6 }}>You can skip Java only after a successful setup — offline preview still works without it.</div>}
+            {!javaReady && <div className="tiny muted" style={{ marginTop: 6 }}>Skipping is fine — the launcher sets Java up automatically before your first launch.</div>}
           </div>
         )}
 

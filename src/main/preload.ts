@@ -137,8 +137,6 @@ const gooner = {
   setMsClientId: (id: string): Promise<string> => ipcRenderer.invoke('auth:ms-client-id:set', id),
   signInElyby: (username: string, password: string): Promise<unknown> =>
     ipcRenderer.invoke('auth:elyby', username, password),
-  signInCustom: (server: string, username: string, password: string): Promise<unknown> =>
-    ipcRenderer.invoke('auth:custom', server, username, password),
   removeAccount: (id: string): Promise<void> => ipcRenderer.invoke('auth:remove', id),
   getInstances: (): Promise<Instance[]> =>
     ipcRenderer.invoke('launcher:instances').then((list: RawInstance[]) => list.map(mapInstance)),

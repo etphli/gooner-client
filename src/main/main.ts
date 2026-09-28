@@ -163,15 +163,6 @@ function registerIpc(): void {
     await saveAccount(acc);
     return acc;
   });
-  ipcMain.handle('auth:custom', async (_e, server: string, u: string, p: string) => {
-    if (typeof server !== 'string' || server.length > 2083) throw new Error('Invalid server URL');
-    if (typeof u !== 'string' || !u || typeof p !== 'string' || !p) throw new Error('Username and password required');
-    const { signInWithCustomYggdrasil } = await import('./auth/elyby.js');
-    const { saveAccount } = await import('./auth/store.js');
-    const acc = await signInWithCustomYggdrasil(server, u, p);
-    await saveAccount(acc);
-    return acc;
-  });
   ipcMain.handle('auth:remove', async (_e, id: string) => {
     if (typeof id !== 'string' || !id) throw new Error('Invalid account id');
     const { removeAccount } = await import('./auth/store.js');
