@@ -48,23 +48,17 @@ Inspired by [Polyfrost OneLauncher / OneClient](https://github.com/Polyfrost/One
 
 1. Download the correct DMG from [releases/latest](https://github.com/etphli/gooner-client/releases/latest).
 2. Verify checksum (below).
-3. Double-click the `.dmg` to mount it. A branded installer window opens — drag `Gooner Client` onto `Applications`.
-4. Eject the DMG, launch from `Applications` (first run: Right-click → Open, see below).
+3. Double-click the `.dmg` to mount it. Drag `Gooner Client` into your personal Applications folder: `/Users/<your-name>/Applications` (in Finder: Go → Home, create an `Applications` folder there if you don't have one, and drag the app into it — ignore the arrow, that points at system Applications).
+4. Eject the DMG.
 
-### macOS says the app is "damaged" or "can't be opened"
+### First launch — one-time Terminal fix
 
-This happens because releases are ad-hoc signed, not Apple-notarized (that needs a paid $99/yr Developer account — planned later). The app is safe (verify checksum above). One-time fix, pick one:
+macOS will say the app is "damaged" or "can't be opened" because releases aren't Apple-notarized yet (paid cert planned). Fix it in Terminal:
 
-```sh
-# Option A — Finder (easiest):
-# Right-click Gooner Client.app → Open → Open.
-# If blocked: System Settings → Privacy & Security → Open Anyway.
-
-# Option B — Terminal (clears it permanently):
-xattr -cr "/Applications/Gooner Client.app"
-```
-
-Do not disable Gatekeeper globally.
+1. Open **Terminal**.
+2. Type exactly (note the trailing space): `xattr -cr ` 
+3. Drag `Gooner Client` from your `~/Applications` folder **into the Terminal window** — the path fills in automatically. Press **Enter**.
+4. Launch the app from `~/Applications`. Done permanently — you won't see the error again.
 
 ### Verify download
 

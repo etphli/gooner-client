@@ -1,3 +1,9 @@
+export interface LiteAccount {
+  id: string;
+  provider: string;
+  minecraftUsername: string;
+  minecraftUuid: string;
+}
 export interface Instance {
   id: string;
   name: string;
@@ -5,6 +11,27 @@ export interface Instance {
   loader?: string;
   lastPlayed?: number;
   icon?: string;
+}
+export interface CreateInstanceInput {
+  name: string;
+  mcVersion: string;
+  modLoader?: 'vanilla' | 'fabric';
+  loaderVersion?: string | null;
+}
+export interface InstalledModItem {
+  slug: string;
+  name: string;
+  enabled: boolean;
+  version: string;
+  file: string;
+}
+export interface ModSearchResult {
+  slug: string;
+  title: string;
+  description: string;
+  iconUrl: string;
+  downloads: number;
+  clientSide: string;
 }
 export interface ModInfo {
   id: string;
@@ -30,8 +57,8 @@ export interface DeviceFlow {
   verificationUri: string;
   verificationUriComplete?: string;
   expiresIn: number;
-  qrDataUrl?: string;
   sessionId: string;
+  qrDataUrl?: string;
 }
 export interface Cosmetic {
   id: string;
@@ -41,29 +68,56 @@ export interface Cosmetic {
   emoji: string;
   equipped: boolean;
 }
+export type UpdaterChannel =
+  | 'updater:checking'
+  | 'updater:available'
+  | 'updater:not-available'
+  | 'updater:progress'
+  | 'updater:downloaded'
+  | 'updater:error';
 declare global {
   interface Window {
     gooner: {
+      getVersion(): Promise<string>;
+      getPlatform(): Promise<string>;
+      getArch(): Promise<string>;
+      getSystem(): Promise<{ platform: string; arch: string; release: string; totalMem: number; freeMem: number; cpus: number }>;
+      openExternal(url: string): Promise<void>;
+      pickDirectory(): Promise<string | null>;
+      listAccounts(): Promise<LiteAccount[]>;
+      activeAccount(): Promise<LiteAccount | null>;
+      setActiveAccount(id: string): Promise<void>;
+      signInOffline(username: string): Promise<unknown>;
+      startDeviceFlow(): Promise<DeviceFlow>;
+      pollDeviceFlow(deviceCode: string): Promise<unknown>;
+      cancelDeviceFlow(deviceCode?: string): Promise<void>;
+      signInBrowser(): Promise<unknown>;
+      signInElyby(username: string, password: string): Promise<unknown>;
+      signInCustom(server: string, username: string, password: string): Promise<unknown>;
+      removeAccount(id: string): Promise<void>;
       getInstances(): Promise<Instance[]>;
-      getVersions(): Promise<string[]>;
-      launch(opts: { instanceId: string; version: string }): Promise<void>;
+      createInstance(input: CreateInstanceInput): Promise<Instance>;
+      deleteInstance(id: string): Promise<void>;
+      getVersions(filter?: 'release' | 'snapshot' | 'all'): Promise<string[]>;
+      launch(opts: { instanceId: string; version?: string }): Promise<{ pid?: number }>;
       cancelLaunch(): Promise<void>;
       onLaunchProgress(cb: (p: { percent: number; task: string }) => void): () => void;
-      getMods(instanceId?: string): Promise<ModInfo[]>;
-      searchMods(query?: string): Promise<ModInfo[]>;
-      toggleMod(id?: string, enabled?: boolean): Promise<void>;
+      getMods(instanceId: string): Promise<InstalledModItem[]>;
+      searchMods(query: string, mcVersion?: string): Promise<ModSearchResult[]>;
+      installMod(instanceId: string, slug: string, mcVersion?: string): Promise<{ file: string; version: string }>;
+      toggleMod(instanceId: string, slug: string | boolean, enabled?: boolean): Promise<void>;
+      removeMod(instanceId: string, slug: string): Promise<void>;
       setModVersion(id?: string, version?: string): Promise<void>;
+      ensureJava(mcVersion?: string, major?: 17 | 21): Promise<{ path: string; major: 17 | 21 }>;
+      onJavaProgress(cb: (p: { message: string }) => void): () => void;
+      onUpdater(channel: UpdaterChannel, cb: (payload?: unknown) => void): () => void;
       getSettings(): Promise<ClientSettings>;
       saveSettings(s: ClientSettings): Promise<void>;
       browseJava(): Promise<string | null>;
       getCosmetics(): Promise<Cosmetic[]>;
       equipCosmetic(id: string): Promise<void>;
-      startDeviceFlow(): Promise<DeviceFlow>;
-      cancelDeviceFlow(sessionId?: string): Promise<void>;
-      signInBrowser(): Promise<unknown>;
-      signInOffline(username: string): Promise<unknown>;
-      signInElyby(username: string, password: string): Promise<unknown>;
-      signInCustom(server: string, username: string, password: string): Promise<void>;
+      checkForUpdates(): Promise<unknown>;
+      quitAndInstall(): Promise<void>;
     };
   }
 }

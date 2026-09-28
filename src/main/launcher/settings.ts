@@ -24,6 +24,8 @@ export interface GoonerSettings {
   concurrentDownloads: number;
   closeOnLaunch: boolean;
   discordRpc: boolean;
+  /** Active account id (auth:active:get/set). null = none selected. */
+  activeAccountId: string | null;
 }
 
 export function getDefaultDataDir(): string {
@@ -55,6 +57,7 @@ export function defaultSettings(): GoonerSettings {
     concurrentDownloads: 6,
     closeOnLaunch: false,
     discordRpc: true,
+    activeAccountId: null,
   };
 }
 
@@ -73,6 +76,8 @@ function sanitize(input: Partial<GoonerSettings>, base: GoonerSettings): GoonerS
     input.theme === 'dark' || input.theme === 'light' || input.theme === 'system' || input.theme === 'gooner'
       ? input.theme
       : base.theme;
+  const rawActive = input.activeAccountId ?? base.activeAccountId;
+  const activeAccountId = typeof rawActive === 'string' && rawActive.length > 0 ? rawActive : null;
   return {
     maxRamMb,
     minRamMb,
@@ -85,6 +90,7 @@ function sanitize(input: Partial<GoonerSettings>, base: GoonerSettings): GoonerS
     concurrentDownloads: clamp(input.concurrentDownloads ?? base.concurrentDownloads, 1, 16),
     closeOnLaunch: Boolean(input.closeOnLaunch ?? base.closeOnLaunch),
     discordRpc: input.discordRpc ?? base.discordRpc,
+    activeAccountId,
   };
 }
 

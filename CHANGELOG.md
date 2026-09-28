@@ -3,9 +3,24 @@ All notable changes documented. Format based on Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
-## [0.1.3] - 2026-09-28
+## [0.2.0] - 2026-09-28
+### Added
+- Onboarding: first-launch sign-in gate (all 5 auth ways) + Java setup with progress.
+- Profile menu (top-right): switch/add/remove accounts.
+- In-app updates: check, download progress, restart (no reinstall).
+- Mod browser: search + install any Fabric Modrinth mod; per-profile mod folders.
+- Profiles: create/delete mod profiles, launch the game from any profile.
+- Any game version: release/snapshot picker via live Mojang manifest.
+- Premium Notion-style light/dark UI; native traffic lights (no more dupes).
+### Fixed
+- Crisp multi-size app icon; tighter DMG layout.
 ### Removed
 - Windows NSIS build (macOS-first: DMGs + Linux AppImage only).
+
+## [0.1.3] - 2026-09-28
+### Added
+- Per-Mac download guidance (default M-chip arm64).
+- Release-notes template (docs/RELEASE_NOTES_TEMPLATE.md).
 
 ## [0.1.2] - 2026-09-28
 ### Added

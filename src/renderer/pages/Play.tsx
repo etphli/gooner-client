@@ -1,63 +1,199 @@
-import React, { useEffect, useState } from 'react';
-import { Card, ProgressBar, SectionTitle } from '../components/ui';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Card, PageHeader, ProgressBar, SegmentedControl } from '../components/ui';
 import type { Instance } from '../gooner';
+
+type VersionFilter = 'release' | 'snapshot';
+
+interface ExtGooner {
+  getInstances?: () => Promise<unknown>;
+  getVersions?: (filter?: string) => Promise<unknown>;
+  launch?: (opts: { instanceId: string; version?: string }) => Promise<unknown>;
+  cancelLaunch?: () => Promise<unknown>;
+  onLaunchProgress?: (cb: (p: { percent: number; task: string }) => void) => (() => void) | void;
+}
+
+function asInstances(v: unknown): Instance[] {
+  if (!Array.isArray(v)) return [];
+  return (v as Record<string, unknown>[]).filter((i) => i && typeof i.id === 'string').map((i) => ({
+    id: String(i.id),
+    name: typeof i.name === 'string' ? String(i.name) : String(i.id),
+    version: typeof i.version === 'string' ? String(i.version) : '',
+    loader: typeof i.loader === 'string' ? String(i.loader) : undefined,
+  }));
+}
+
+function asStrings(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return (v as unknown[]).filter((x): x is string => typeof x === 'string');
+}
+
+function isReleaseVersion(v: string): boolean {
+  return /^\d+\.\d+(\.\d+)?$/.test(v.trim());
+}
+
+const FALLBACK_VERSIONS = ['1.21.1', '1.20.4', '1.20.1'];
 
 const Play: React.FC = () => {
   const [instances, setInstances] = useState<Instance[]>([{ id: 'main', name: 'Main Survival', version: '1.21.1', loader: 'fabric' }]);
   const [instanceId, setInstanceId] = useState('main');
-  const [versions, setVersions] = useState<string[]>(['1.21.1', '1.20.4', '1.20.1']);
+  const [filter, setFilter] = useState<VersionFilter>('release');
+  const [versions, setVersions] = useState<string[]>(FALLBACK_VERSIONS);
   const [version, setVersion] = useState('1.21.1');
+  const [loadingVersions, setLoadingVersions] = useState(false);
   const [launching, setLaunching] = useState(false);
   const [progress, setProgress] = useState(0);
   const [task, setTask] = useState('Idle');
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    window.gooner?.getInstances().then((l) => { if (l?.length) { setInstances(l); setInstanceId(l[0].id); } }).catch(() => undefined);
-    window.gooner?.getVersions().then((v) => { if (v?.length) { setVersions(v); setVersion(v[0]); } }).catch(() => undefined);
+    (window.gooner as unknown as ExtGooner | undefined)?.getInstances?.()?.then((l) => {
+      const list = asInstances(l);
+      if (list.length) { setInstances(list); setInstanceId(list[0].id); }
+    })?.catch(() => undefined);
   }, []);
 
-  const launch = async () => {
-    setLaunching(true); setProgress(2); setTask('Preparing…');
-    const off = window.gooner?.onLaunchProgress?.((p) => { setProgress(p.percent); setTask(p.task); });
-    const t = window.setInterval(() => setProgress((p) => (p < 90 ? p + Math.random() * 6 : p)), 400);
+  const loadVersions = useCallback(async (f: VersionFilter) => {
+    setLoadingVersions(true);
     try {
-      await window.gooner?.launch?.({ instanceId, version });
-      setProgress(100); setTask('Running');
-    } catch {
-      setTask('Failed — see logs');
+      const ext = window.gooner as unknown as ExtGooner | undefined;
+      let list: string[] = [];
+      try {
+        const raw = await ext?.getVersions?.(f);
+        list = asStrings(raw);
+      } catch {
+        list = [];
+      }
+      // Backend may ignore the filter (release-only). Apply client-side filter.
+      if (list.length) {
+        const filtered = f === 'release' ? list.filter(isReleaseVersion) : list.filter((v) => !isReleaseVersion(v));
+        // If backend returned release-only but snapshot requested, try the live manifest.
+        if (filtered.length) {
+          list = filtered;
+        } else if (f === 'snapshot') {
+          try {
+            const res = await fetch('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json');
+            if (res.ok) {
+              const j = (await res.json()) as { versions?: { id: string; type: string }[] };
+              const all = (j.versions ?? []).map((x) => x.id).filter(Boolean);
+              if (all.length) list = all.filter((v) => !isReleaseVersion(v));
+            }
+          } catch { /* keep backend list */ }
+          if (!list.some((v) => !isReleaseVersion(v))) {
+            // Graceful fallback: show what we have with a note.
+            setError('No snapshots from local cache — showing releases.');
+            try {
+              list = asStrings(await ext?.getVersions?.('release')) ?? [];
+            } catch {
+              list = [];
+            }
+            if (!list.length) list = FALLBACK_VERSIONS;
+          } else {
+            setError('');
+          }
+        }
+      }
+      if (!list.length) {
+        // Last resort: try unfiltered, then fallback constants.
+        try {
+          const rawAll = await ext?.getVersions?.();
+          const all = asStrings(rawAll);
+          if (all.length) list = f === 'release' ? all.filter(isReleaseVersion) : all;
+        } catch { /* ignore */ }
+      }
+      if (!list.length) list = FALLBACK_VERSIONS;
+      else setError((prev) => (f === 'release' ? '' : prev));
+      setVersions(list);
+      setVersion((cur) => (list.includes(cur) ? cur : list[0]));
     } finally {
-      window.clearInterval(t); off?.();
+      setLoadingVersions(false);
+    }
+  }, []);
+
+  useEffect(() => { void loadVersions(filter); }, [filter, loadVersions]);
+
+  const launch = async () => {
+    if (launching) return;
+    setLaunching(true);
+    setError('');
+    setProgress(1);
+    setTask('Preparing…');
+    const ext = window.gooner as unknown as ExtGooner | undefined;
+    let off: (() => void) | void;
+    try {
+      off = ext?.onLaunchProgress?.((p) => {
+        if (typeof p?.percent === 'number') setProgress(p.percent);
+        if (p?.task) setTask(p.task);
+      });
+    } catch {
+      off = undefined;
+    }
+    try {
+      // Spec: launch({ instanceId }); keep version for back-compat backends.
+      await ext?.launch?.({ instanceId, version });
+      setProgress(100);
+      setTask('Running');
+    } catch (e) {
+      setTask('Failed');
+      setError(`Launch failed: ${(e as Error)?.message ?? e}`);
+    } finally {
+      if (typeof off === 'function') { try { off(); } catch { /* ignore */ } }
       window.setTimeout(() => setLaunching(false), 800);
     }
   };
 
+  const cancel = async () => {
+    try {
+      await (window.gooner as unknown as ExtGooner | undefined)?.cancelLaunch?.();
+      setTask('Cancelled');
+    } catch { /* ignore */ }
+    setLaunching(false);
+  };
+
+  const inst = instances.find((i) => i.id === instanceId);
+
   return (
-    <div style={{ maxWidth: 760 }}>
-      <SectionTitle>Play</SectionTitle>
-      <p style={{ color: 'var(--text2)', margin: '0 0 16px' }}>Pick an instance, lock a version, hit Play.</p>
-      <Card style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-        <div style={{ width: 120, height: 120, borderRadius: 16, flexShrink: 0, background: 'linear-gradient(135deg,#30d158,#0a84ff 60%,#bf5af2)', display: 'grid', placeItems: 'center', fontSize: 52 }}>⛏️</div>
+    <div className="page">
+      <PageHeader
+        title="Play"
+        sub="Pick an instance, lock a version, hit Play."
+        actions={
+          <SegmentedControl
+            ariaLabel="Version type"
+            value={filter}
+            onChange={(v) => setFilter(v as VersionFilter)}
+            options={[
+              { value: 'release', label: 'Releases' },
+              { value: 'snapshot', label: 'Snapshots' },
+            ]}
+          />
+        }
+      />
+      <Card style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+        <div style={{ width: 96, height: 96, borderRadius: 14, flexShrink: 0, background: 'linear-gradient(135deg,#2563eb,#9333ea)', display: 'grid', placeItems: 'center', fontSize: 42 }} aria-hidden>⛏️</div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <label htmlFor="play-instance" style={{ fontSize: 12, color: 'var(--text2)' }}>Instance</label>
+          <label className="label" htmlFor="play-instance">Instance</label>
           <select id="play-instance" className="select" value={instanceId} onChange={(e) => setInstanceId(e.target.value)}>
             {instances.map((i) => <option key={i.id} value={i.id}>{i.name}{i.loader ? ` — ${i.loader}` : ''}</option>)}
           </select>
-          <div style={{ height: 10 }} />
-          <label htmlFor="play-version" style={{ fontSize: 12, color: 'var(--text2)' }}>Version</label>
-          <select id="play-version" className="select" value={version} onChange={(e) => setVersion(e.target.value)}>
+          <div style={{ height: 8 }} />
+          <label className="label" htmlFor="play-version">Version {loadingVersions ? '· loading…' : `· ${versions.length}`}</label>
+          <select id="play-version" className="select mono" value={version} onChange={(e) => setVersion(e.target.value)}>
             {versions.map((v) => <option key={v} value={v}>{v}</option>)}
           </select>
+          {inst?.version && <div className="tiny muted" style={{ marginTop: 4 }}>Instance default: <span className="mono">{inst.version}</span></div>}
         </div>
       </Card>
-      <div style={{ height: 14 }} />
+      <div style={{ height: 10 }} />
       <Card>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button className="btn-primary" style={{ fontSize: 15, padding: '10px 34px' }} disabled={launching} onClick={launch}>
-            {launching ? 'Launching…' : '▶  Play'}
+        <div className="row">
+          <button className="btn-primary" style={{ fontSize: 14, padding: '9px 30px' }} disabled={launching} onClick={() => void launch()}>
+            {launching ? (<><span className="spinner" aria-hidden /><span>Launching…</span></>) : '▶  Play'}
           </button>
-          <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text2)' }} className="mono">{progress.toFixed(0)}% • {task}</span>
+          {launching && <button className="btn-ghost" onClick={() => void cancel()}>Cancel</button>}
+          <span className="mono tiny muted" style={{ marginLeft: 'auto' }}>{Math.round(progress)}% • {task}</span>
         </div>
-        <div style={{ marginTop: 12 }}><ProgressBar percent={progress} /></div>
+        <div style={{ marginTop: 10 }}><ProgressBar percent={progress} /></div>
+        {error && <div className="status-line" style={{ marginTop: 10 }}>{error}</div>}
       </Card>
     </div>
   );
