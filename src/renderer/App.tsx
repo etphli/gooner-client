@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import './styles.css';
 import TitleBar from './components/TitleBar';
 import UpdateBanner from './components/UpdateBanner';
+import UpdateDot from './components/UpdateDot';
 import Sidebar from './components/Sidebar';
 import ProfileMenu from './components/ProfileMenu';
 import Play from './pages/Play';
@@ -116,7 +117,7 @@ const App: React.FC = () => {
     <div className="app-shell">
       <TitleBar
         title="Gooner Client"
-        right={<ProfileMenu onAddAccount={() => setRoute('accounts')} onAccountChange={() => void refreshAccounts()} />}
+        right={<><UpdateDot /><ProfileMenu onAddAccount={() => setRoute('accounts')} onAccountChange={() => void refreshAccounts()} /></>}
       />
       <UpdateBanner />
       <div className="app-body">

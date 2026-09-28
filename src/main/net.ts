@@ -221,3 +221,57 @@ export async function fetchJson<T>(url: string, init: RequestInit = {}, opts: Fe
   }
   return { status: res.status, json };
 }
+
+export interface EndpointCheck {
+  name: string;
+  host: string;
+  ok: boolean;
+  ms: number;
+  detail: string;
+  hint: string;
+}
+
+const DIAG_ENDPOINTS: Array<{ name: string; url: string }> = [
+  { name: 'Microsoft sign-in', url: 'https://login.microsoftonline.com/consumers/v2.0/.well-known/openid-configuration' },
+  { name: 'Xbox Live', url: 'https://user.auth.xboxlive.com/' },
+  { name: 'Minecraft services', url: 'https://api.minecraftservices.com/' },
+  { name: 'Mojang versions', url: 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json' },
+  { name: 'Ely.by', url: 'https://authserver.ely.by/' },
+  { name: 'Modrinth', url: 'https://api.modrinth.com/v2/search?query=a&limit=1' },
+  { name: 'Java (Adoptium)', url: 'https://api.adoptium.net/v3/info/available_releases' },
+];
+
+function hintFor(detail: string): string {
+  if (/DNS lookup failed/i.test(detail)) {
+    return 'Mac DNS is failing — System Settings → Wi-Fi → Details → DNS → add 1.1.1.1, or turn on a VPN (e.g. free ProtonVPN).';
+  }
+  if (/refused|dropped/i.test(detail)) {
+    return 'Blocked by firewall/VPN — allow Gooner Client or set a proxy in Settings → Network.';
+  }
+  if (/timed out/i.test(detail)) {
+    return 'Too slow/blocked — try a VPN or proxy in Settings → Network.';
+  }
+  if (/TLS|certificate|clock/i.test(detail)) {
+    return 'Check Mac date/time, or disable HTTPS-scanning proxy/VPN.';
+  }
+  return 'Check connection, firewall, or VPN and retry.';
+}
+
+/**
+ * Reachability check per backend host. Any HTTP response counts as
+ * reachable; only transport failures fail. Used by Settings → Diagnostics.
+ */
+export async function diagnoseEndpoints(): Promise<EndpointCheck[]> {
+  const run = async (name: string, url: string): Promise<EndpointCheck> => {
+    const host = hostOf(url);
+    const started = Date.now();
+    try {
+      const res = await fetchWithRetry(url, { method: 'HEAD' }, { label: name, timeoutMs: 12000, retries: 0 });
+      return { name, host, ok: true, ms: Date.now() - started, detail: `HTTP ${res.status}`, hint: '' };
+    } catch (e) {
+      const detail = e instanceof AuthError ? e.message.replace(`${name}: `, '').replace(/\. Check connection.*$/, '') : describeNetworkError(e);
+      return { name, host, ok: false, ms: Date.now() - started, detail, hint: hintFor(detail) };
+    }
+  };
+  return Promise.all(DIAG_ENDPOINTS.map((d) => run(d.name, d.url)));
+}

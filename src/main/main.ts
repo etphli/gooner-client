@@ -310,9 +310,14 @@ function registerIpc(): void {
     await fs.rm(disabled, { force: true });
   });
 
+  // Network diagnostics
+  ipcMain.handle('net:diagnose', async () => {
+    const { diagnoseEndpoints } = await import('./net.js');
+    return diagnoseEndpoints();
+  });
+
   // Java
-  ipcMain.handle('java:ensure', async (e, mcVersion?: string | number, major?: number) => {
-    const sender = e.sender;
+  ipcMain.handle('java:ensure', async (e, mcVersion?: string | number, major?: number) => {    const sender = e.sender;
     const onProgress = (message: string): void => {
       try {
         sender.send('java:progress', { message });
@@ -394,3 +399,53 @@ app.whenReady().then(async () => {
 });
 app.on('second-instance', () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus(); } });
 app.on('window-all-closed', () => { if (!isMac) app.quit(); });
+
+// Check for updates on quit: if one is found, download it and offer to
+// install immediately instead of silently quitting. Second quit attempt
+// within the flow always quits (never trap the user).
+let quitArmed = false;
+let quitAttempts = 0;
+app.on('before-quit', (e) => {
+  if (isDev || !app.isPackaged || quitArmed) return;
+  quitAttempts += 1;
+  if (quitAttempts > 1) return;
+  e.preventDefault();
+  void (async () => {
+    try {
+      const res = await autoUpdater.checkForUpdates();
+      const v = res?.updateInfo?.version;
+      if (v && v !== app.getVersion()) {
+        await autoUpdater.downloadUpdate();
+        clearDockBadge();
+        const { dialog: dlg } = await import('electron');
+        const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+        const { response } = parent
+          ? await dlg.showMessageBox(parent, {
+              type: 'question',
+              title: 'Update ready',
+              message: `Gooner Client v${v} downloaded. Install now?`,
+              buttons: ['Install & restart', 'Quit without updating'],
+              defaultId: 0,
+              cancelId: 1,
+            })
+          : await dlg.showMessageBox({
+              type: 'question',
+              title: 'Update ready',
+              message: `Gooner Client v${v} downloaded. Install now?`,
+              buttons: ['Install & restart', 'Quit without updating'],
+              defaultId: 0,
+              cancelId: 1,
+            });
+        if (response === 0) {
+          quitArmed = true;
+          autoUpdater.quitAndInstall(false, true);
+          return;
+        }
+      }
+    } catch {
+      /* any failure → just quit */
+    }
+    quitArmed = true;
+    app.quit();
+  })();
+});

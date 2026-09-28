@@ -110,6 +110,7 @@ declare global {
       removeMod(instanceId: string, slug: string): Promise<void>;
       setModVersion(id?: string, version?: string): Promise<void>;
       ensureJava(mcVersion?: string, major?: 17 | 21): Promise<{ path: string; major: 17 | 21 }>;
+      diagnoseNetwork(): Promise<Array<{ name: string; host: string; ok: boolean; ms: number; detail: string; hint: string }>>;
       onJavaProgress(cb: (p: { message: string }) => void): () => void;
       onUpdater(channel: UpdaterChannel, cb: (payload?: unknown) => void): () => void;
       getSettings(): Promise<ClientSettings>;

@@ -11,6 +11,8 @@ interface ExtGooner {
   onUpdater?: (event: string, cb: (payload?: unknown) => void) => (() => void) | void;
   getMsClientId?: () => Promise<string>;
   setMsClientId?: (id: string) => Promise<string>;
+  diagnoseNetwork?: () => Promise<Array<{ name: string; host: string; ok: boolean; ms: number; detail: string; hint: string }>>;
+  openExternal?: (u: string) => Promise<unknown>;
 }
 
 const Settings: React.FC<{ theme: Theme; setTheme: (t: Theme) => void }> = ({ theme, setTheme }) => {
@@ -20,6 +22,8 @@ const Settings: React.FC<{ theme: Theme; setTheme: (t: Theme) => void }> = ({ th
   const [upInfo, setUpInfo] = useState('Up to date check has not run yet.');
   const [upPct, setUpPct] = useState(0);
   const [upBusy, setUpBusy] = useState(false);
+  const [diag, setDiag] = useState<Array<{ name: string; host: string; ok: boolean; ms: number; detail: string; hint: string }>>([]);
+  const [diagBusy, setDiagBusy] = useState(false);
   const [msId, setMsId] = useState('');
   const [msSaved, setMsSaved] = useState('');
 
@@ -101,6 +105,18 @@ const Settings: React.FC<{ theme: Theme; setTheme: (t: Theme) => void }> = ({ th
     }
   };
 
+  const runDiag = async () => {
+    setDiagBusy(true);
+    try {
+      const r = await (window.gooner as unknown as ExtGooner | undefined)?.diagnoseNetwork?.();
+      setDiag(Array.isArray(r) ? r : []);
+    } catch {
+      setDiag([]);
+    } finally {
+      setDiagBusy(false);
+    }
+  };
+
   return (
     <div className="page">
       <PageHeader title="Settings" sub="Memory, Java, appearance, HUD, updates." />
@@ -156,6 +172,32 @@ const Settings: React.FC<{ theme: Theme; setTheme: (t: Theme) => void }> = ({ th
           </div>
           {msId !== msSaved && <div className="tiny muted" style={{ marginTop: 6 }}>Unsaved changes.</div>}
         </Field>
+      </Card>
+      <div style={{ height: 10 }} />
+      <Card>
+        <div className="row" style={{ justifyContent: 'space-between' }}>
+          <div>
+            <strong>Connection diagnostics</strong>
+            <div className="tiny muted">Tests every server the launcher needs. On a strict network, turn on any reputable VPN app (e.g. free ProtonVPN) — the launcher works through it automatically.</div>
+          </div>
+          <button type="button" className="btn-ghost" disabled={diagBusy} onClick={() => void runDiag()}>
+            {diagBusy ? (<><span className="spinner" aria-hidden /> Testing…</>) : 'Run diagnostics'}
+          </button>
+        </div>
+        {diag.length > 0 && (
+          <div className="stack" style={{ marginTop: 10 }}>
+            {diag.map((d) => (
+              <div key={d.name} style={{ padding: '7px 9px', border: '1px solid var(--border)', borderRadius: 8 }}>
+                <div className="row" style={{ justifyContent: 'space-between' }}>
+                  <span><span aria-hidden>{d.ok ? '✓ ' : '✗ '}</span><strong>{d.name}</strong> <span className="tiny muted mono">{d.host} · {d.ms}ms</span></span>
+                  <span className={`pill ${d.ok ? 'pill-ok' : 'pill-err'}`}>{d.ok ? 'OK' : 'FAIL'}</span>
+                </div>
+                {!d.ok && <div className="tiny" style={{ marginTop: 4 }}>{d.detail}</div>}
+                {!d.ok && d.hint && <div className="tiny muted" style={{ marginTop: 2 }}>{d.hint}</div>}
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
       <div style={{ height: 10 }} />
       <Card>

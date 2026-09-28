@@ -3,6 +3,11 @@ All notable changes documented. Format based on Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-28
+### Added
+- Quit-time update check (offers install on quit) + top-right update dot.
+- Connection diagnostics in Settings (per-server reachability + fix hints).
+
 ## [0.3.1] - 2026-09-28
 ### Fixed
 - In-app updates: publish latest-mac.yml so the updater can find new versions.

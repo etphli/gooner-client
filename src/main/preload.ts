@@ -183,6 +183,8 @@ const gooner = {
   },
   ensureJava: (mcVersion?: string, major?: 17 | 21): Promise<{ path: string; major: 17 | 21 }> =>
     ipcRenderer.invoke('java:ensure', mcVersion, major),
+  diagnoseNetwork: (): Promise<Array<{ name: string; host: string; ok: boolean; ms: number; detail: string; hint: string }>> =>
+    ipcRenderer.invoke('net:diagnose'),
   onJavaProgress: (cb: (p: { message: string }) => void): (() => void) => {
     const handler = (_e: unknown, payload: { message: string }): void => cb(payload);
     ipcRenderer.on('java:progress', handler as (...args: unknown[]) => void);
