@@ -339,8 +339,7 @@ const Mods: React.FC = () => {
         <SectionTitle>Mods</SectionTitle>
         <p style={{ ...muted, margin: '0 0 4px' }}>Profiles, Modrinth browser, and installed mods — per instance.</p>
         <p style={{ ...muted, margin: 0, fontSize: 12 }}>
-          CurseForge needs an API key set in Settings — CurseForge browsing is disabled here (Modrinth only, no CF
-          calls).
+          CurseForge browsing isn't available yet — Modrinth search + install works fully below.
         </p>
       </div>
 
