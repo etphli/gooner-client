@@ -28,6 +28,7 @@ mac:
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  icon: build/icon.png
   target:
     - target: dmg
       arch:
@@ -37,14 +38,20 @@ mac:
   darkModeSupport: true
 
 dmg:
+  title: Install Gooner Client
+  icon: build/icon.png
+  iconSize: 160
+  background: build/dmg-background.png
+  backgroundColor: '#101218'
   window:
-    width: 540
-    height: 380
+    width: 660
+    height: 420
     x: 400
     y: 100
-  iconSize: 100
-  backgroundColor: '#0e0f13'
-  title: ${productName} ${version}
+  contents:
+    - { x: 170, y: 210, type: file }
+    - { x: 490, y: 210, type: link, name: Applications }
+  format: UDZO
 
 win:
   target:

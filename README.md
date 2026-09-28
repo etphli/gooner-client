@@ -44,7 +44,7 @@ Inspired by [Polyfrost OneLauncher / OneClient](https://github.com/Polyfrost/One
 
 1. Download the correct DMG from [releases/latest](https://github.com/etphli/gooner-client/releases/latest).
 2. Verify checksum (below).
-3. Double-click the `.dmg` to mount it.
+3. Double-click the `.dmg` to mount it. A branded installer window opens — drag `Gooner Client` onto `Applications`.
 4. Drag `Gooner Client.app` into `Applications`.
 5. Eject the DMG, launch from `Applications` (first run: Right-click → Open).
 
