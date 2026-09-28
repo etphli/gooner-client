@@ -42,7 +42,6 @@ dmg:
   icon: build/icon.png
   iconSize: 160
   background: build/dmg-background.png
-  backgroundColor: '#101218'
   window:
     width: 660
     height: 420
@@ -54,6 +53,7 @@ dmg:
   format: UDZO
 
 win:
+  signAndEditExecutable: false
   target:
     - target: nsis
       arch:

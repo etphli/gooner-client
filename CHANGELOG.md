@@ -7,6 +7,9 @@ All notable changes documented. Format based on Keep a Changelog, SemVer.
 ### Added
 - Branded DMG: custom app icon, dark installer background, arranged drag-to-Applications window.
 - Visual polish + auth/launcher hardening (see README).
+### Fixed
+- DMG build: background image only (removed conflicting backgroundColor).
+- Linux NSIS build without wine (unsigned: signAndEditExecutable off).
 
 ## [0.1.1] - 2026-09-28
 ### Added
