@@ -20,7 +20,6 @@ jobs:
       - run: npm run dist:mac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - name: Checksums
         run: |
           set -euo pipefail

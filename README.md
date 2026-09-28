@@ -49,18 +49,19 @@ Inspired by [Polyfrost OneLauncher / OneClient](https://github.com/Polyfrost/One
 1. Download the correct DMG from [releases/latest](https://github.com/etphli/gooner-client/releases/latest).
 2. Verify checksum (below).
 3. Double-click the `.dmg` to mount it. A branded installer window opens — drag `Gooner Client` onto `Applications`.
-4. Drag `Gooner Client.app` into `Applications`.
-5. Eject the DMG, launch from `Applications` (first run: Right-click → Open).
+4. Eject the DMG, launch from `Applications` (first run: Right-click → Open, see below).
 
-### Gatekeeper (unsigned builds)
+### macOS says the app is "damaged" or "can't be opened"
+
+This happens because releases are ad-hoc signed, not Apple-notarized (that needs a paid $99/yr Developer account — planned later). The app is safe (verify checksum above). One-time fix, pick one:
 
 ```sh
-# Recommended one-time allow:
-# Right-click Gooner Client.app → Open → Open
-# or: System Settings → Privacy & Security → Open Anyway
+# Option A — Finder (easiest):
+# Right-click Gooner Client.app → Open → Open.
+# If blocked: System Settings → Privacy & Security → Open Anyway.
 
-# Manual (advanced):
-xattr -d com.apple.quarantine "/Applications/Gooner Client.app"
+# Option B — Terminal (clears it permanently):
+xattr -cr "/Applications/Gooner Client.app"
 ```
 
 Do not disable Gatekeeper globally.
