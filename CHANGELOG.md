@@ -3,6 +3,10 @@ All notable changes documented. Format based on Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-28
+### Removed
+- Windows NSIS build (macOS-first: DMGs + Linux AppImage only).
+
 ## [0.1.2] - 2026-09-28
 ### Added
 - Branded DMG: custom app icon, dark installer background, arranged drag-to-Applications window.

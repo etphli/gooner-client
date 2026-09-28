@@ -38,8 +38,8 @@ jobs:
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  build-win-linux:
-    name: Build win + linux
+  build-linux:
+    name: Build linux AppImage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,12 +49,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: npx electron-builder --win nsis --linux AppImage --publish never
+      - run: npx electron-builder --linux AppImage --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
-          name: win-linux
-          path: |
-            release/*.exe
-            release/*.AppImage
+          name: linux-appimage
+          path: release/*.AppImage
