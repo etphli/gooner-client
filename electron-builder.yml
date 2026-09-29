@@ -7,7 +7,7 @@ directories:
   output: release
   buildResources: build
 
-afterPack: build/after-pack.js
+afterPack: build/after-pack.cjs
 
 extraMetadata:
   main: dist-electron/main.js
