@@ -3,6 +3,13 @@ All notable changes documented. Format based on Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-09-29
+### Fixed
+- In-app updates really work now: mac .zip published (previous fix never took effect — build script overrode it).
+### Added
+- Cosmetics catalog reviewed (63 items, single source of truth, no drift).
+- Sidebar revamp: monochrome SVG icons, active indicator, version footer; matching nav polish app-wide.
+
 ## [0.3.5] - 2026-09-29
 ### Fixed
 - In-app updates on macOS: publish the .zip Squirrel.Mac actually installs from (no more "ZIP file not provided").

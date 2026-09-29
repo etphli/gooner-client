@@ -121,7 +121,7 @@ const App: React.FC = () => {
       />
       <UpdateBanner />
       <div className="app-body">
-        <Sidebar route={route} go={setRoute} theme={effective} />
+        <Sidebar route={route} go={setRoute} />
         <main className="content">
           {route === 'play' && <Play />}
           {route === 'mods' && <Mods />}

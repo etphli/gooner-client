@@ -1,5 +1,6 @@
 {
   "_license": "SPDX-License-Identifier: GPL-3.0-only",
+  "_note": "Reviewed catalog (63 items). assetBase is a preview-only placeholder until the real asset CDN lands; the app renders gradient+emoji previews from id/rarity.",
   "currency": "gooner_coins",
   "assetBase": "https://example.com/assets/gooner-client",
   "categories": {
