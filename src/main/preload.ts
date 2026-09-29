@@ -177,6 +177,26 @@ const gooner = {
   },
   removeMod: (instanceId: string, slug: string): Promise<void> =>
     ipcRenderer.invoke('mods:remove', instanceId, slug).then(() => undefined),
+  searchProjects: (query: string, mcVersion?: string, projectType?: string): Promise<ModSearchResult[]> =>
+    ipcRenderer.invoke('mods:search-ex', query, mcVersion, projectType),
+  installTo: (
+    instanceId: string,
+    slug: string,
+    mcVersion?: string,
+    kind?: string,
+  ): Promise<{ file: string; version: string }> =>
+    ipcRenderer.invoke('mods:install-to', instanceId, slug, mcVersion, kind),
+  listWorlds: (instanceId: string): Promise<Array<{ name: string; packs: string[] }>> =>
+    ipcRenderer.invoke('datapacks:worlds', instanceId),
+  installDatapackUrl: (
+    instanceId: string,
+    world: string,
+    url: string,
+    filename: string,
+  ): Promise<{ file: string }> =>
+    ipcRenderer.invoke('datapacks:install-url', instanceId, world, url, filename),
+  importDatapackFile: (instanceId: string, world: string): Promise<{ file: string } | null> =>
+    ipcRenderer.invoke('datapacks:import-file', instanceId, world),
   setModVersion: (id?: string, version?: string): Promise<void> => {
     void id;
     void version;

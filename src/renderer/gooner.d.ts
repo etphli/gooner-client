@@ -109,6 +109,11 @@ declare global {
       installMod(instanceId: string, slug: string, mcVersion?: string): Promise<{ file: string; version: string }>;
       toggleMod(instanceId: string, slug: string | boolean, enabled?: boolean): Promise<void>;
       removeMod(instanceId: string, slug: string): Promise<void>;
+      searchProjects(query: string, mcVersion?: string, projectType?: string): Promise<ModSearchResult[]>;
+      installTo(instanceId: string, slug: string, mcVersion?: string, kind?: string): Promise<{ file: string; version: string }>;
+      listWorlds(instanceId: string): Promise<Array<{ name: string; packs: string[] }>>;
+      installDatapackUrl(instanceId: string, world: string, url: string, filename: string): Promise<{ file: string }>;
+      importDatapackFile(instanceId: string, world: string): Promise<{ file: string } | null>;
       setModVersion(id?: string, version?: string): Promise<void>;
       ensureJava(mcVersion?: string, major?: 17 | 21): Promise<{ path: string; major: 17 | 21 }>;
       diagnoseNetwork(): Promise<Array<{ name: string; host: string; ok: boolean; ms: number; detail: string; hint: string }>>;

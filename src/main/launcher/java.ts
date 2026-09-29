@@ -149,7 +149,19 @@ async function downloadToFile(url: string, dest: string): Promise<void> {
         { label: 'Java download', timeoutMs: 10 * 60_000, retries: 0 },
       );
       if (!res.ok || !res.body) {
-        throw new Error(`Temurin download failed: ${res.status} ${res.statusText} (${url})`);
+        // Sniff a little of the body: middleboxes often answer 400 with an
+        // HTML block page — surfacing it tells the user it's their network.
+        let hint = '';
+        try {
+          const ct = res.headers.get('content-type') ?? '';
+          if (ct.includes('text') || ct.includes('html')) {
+            const snippet = ((await res.text()).replace(/\s+/g, ' ') ?? '').slice(0, 160);
+            if (snippet) hint = ` Body: ${snippet}`;
+          }
+        } catch {
+          /* ignore */
+        }
+        throw new Error(`Temurin download failed: ${res.status} ${res.statusText} (${url}).${hint}`);
       }
       // Stream to disk (handles ~200MB JDKs without buffering).
       const nodeStream = res.body as unknown as NodeJS.ReadableStream;
@@ -183,7 +195,17 @@ export interface EnsureJavaOptions {
 }
 
 /**
- * Ensure Temurin `major` is provisioned, returning the absolute java binary path.
+ * Fallback JDK providers when Adoptium is unreachable or answers 400
+ * (filtered networks, middleboxes). Microsoft builds of OpenJDK, direct CDN.
+ */
+function buildFallbackUrls(major: JavaMajor): string[] {
+  const arch = process.arch === 'arm64' ? 'aarch64' : 'x64';
+  if (process.platform !== 'darwin') return [];
+  return [`https://aka.ms/download-jdk/microsoft-jdk-${major}-macos-${arch}.tar.gz`];
+}
+
+/**
+ * Ensure a JDK `major` is provisioned, returning the absolute java binary path.
  * Safe to call on every launch — fast path if already installed.
  */
 export async function ensureJava(major: JavaMajor, opts: EnsureJavaOptions = {}): Promise<string> {
@@ -198,12 +220,36 @@ export async function ensureJava(major: JavaMajor, opts: EnsureJavaOptions = {})
   await fs.mkdir(tmpDir, { recursive: true });
   await fs.mkdir(installDir, { recursive: true });
 
-  const url = buildTemurinUrl(major);
-  const archive = path.join(tmpDir, `temurin-${major}.tar.gz`);
-  log(`Downloading Temurin ${major} (${getTemurinOs()}/${getTemurinArch()})…`);
-  await downloadToFile(url, archive);
-  log(`Extracting Temurin ${major}…`);
-  await extractArchive(archive, installDir);
+  const attempts: Array<{ name: string; url: string }> = [
+    { name: `Temurin ${major}`, url: buildTemurinUrl(major) },
+    ...buildFallbackUrls(major).map((url) => ({ name: `Microsoft JDK ${major}`, url })),
+  ];
+  const errors: string[] = [];
+  for (const a of attempts) {
+    const archive = path.join(tmpDir, `jdk-${major}-${Date.now()}.tar.gz`);
+    try {
+      log(`Downloading ${a.name} (${getTemurinOs()}/${getTemurinArch()})…`);
+      await downloadToFile(a.url, archive);
+      log(`Extracting ${a.name}…`);
+      // Fresh dir per attempt so a partial extract never poisons the install.
+      await fs.rm(installDir, { recursive: true, force: true });
+      await fs.mkdir(installDir, { recursive: true });
+      await extractArchive(archive, installDir);
+      break;
+    } catch (e) {
+      errors.push(`${a.name}: ${(e as Error)?.message ?? e}`);
+      log(`Download failed (${a.name}) — trying next source…`);
+    } finally {
+      await fs.rm(archive, { force: true }).catch(() => undefined);
+    }
+  }
+  if (errors.length >= attempts.length) {
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+    throw new Error(
+      `Java ${major} download failed from all sources (${errors.join(' | ').slice(0, 400)}). ` +
+        `On filtered networks turn on a VPN or set a proxy / Secure DNS in Settings → Network and retry.`,
+    );
+  }
 
   // macOS quarantine / exec bit fix for downloaded JDK
   if (process.platform !== 'win32') {

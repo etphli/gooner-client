@@ -40,7 +40,7 @@ mac:
 dmg:
   title: Install Gooner Client
   icon: build/icon.icns
-  iconSize: 140
+  iconSize: 128
   background: build/dmg-background.png
   window:
     width: 660

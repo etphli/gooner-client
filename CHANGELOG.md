@@ -3,6 +3,14 @@ All notable changes documented. Format based on Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-09-28
+### Added
+- Cosmetics: skin viewer (see items on your skin) + 63-item catalog.
+- Mods: shaders, resource packs, datapacks (world picker, URL + file import).
+- Light installer DMG (readable in any Finder mode).
+### Fixed
+- Mod search errors now explain network problems + point at Secure DNS/proxy.
+
 ## [0.3.3] - 2026-09-28
 ### Fixed
 - Update check no longer crashes ("object could not be cloned").

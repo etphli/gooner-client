@@ -309,6 +309,108 @@ function registerIpc(): void {
     await fs.rm(enabled, { force: true });
     await fs.rm(disabled, { force: true });
   });
+  ipcMain.handle('mods:search-ex', async (_e, query?: string, mcVersion?: string, projectType?: string) => {
+    const q = typeof query === 'string' ? query : '';
+    const mc = typeof mcVersion === 'string' && mcVersion.length > 0 ? mcVersion : undefined;
+    const t =
+      projectType === 'shader' || projectType === 'resourcepack' || projectType === 'datapack' || projectType === 'modpack' || projectType === 'mod'
+        ? projectType
+        : 'mod';
+    const { searchProjects } = await import('./modrinth.js');
+    return searchProjects(q, mc, t as 'mod' | 'shader' | 'resourcepack' | 'datapack' | 'modpack');
+  });
+  ipcMain.handle(
+    'mods:install-to',
+    async (_e, instanceId?: string, slug?: string, mcVersion?: string, kind?: string) => {
+      if (typeof instanceId !== 'string' || !instanceId) throw new Error('Invalid instanceId');
+      if (typeof slug !== 'string' || !slug) throw new Error('Invalid slug');
+      const { getInstance, getInstanceDir } = await import('./launcher/instances.js');
+      const inst = await getInstance(instanceId);
+      if (!inst) throw new Error(`Instance not found: ${instanceId}`);
+      const mc = typeof mcVersion === 'string' && mcVersion.length > 0 ? mcVersion : inst.mcVersion;
+      const dir = getInstanceDir(instanceId);
+      const k = kind === 'shader' ? 'shader' : kind === 'resourcepack' ? 'resourcepack' : 'mod';
+      const subdir = k === 'shader' ? 'shaderpacks' : k === 'resourcepack' ? 'resourcepacks' : 'mods';
+      const projectType = k === 'shader' ? 'shader' : k === 'resourcepack' ? 'resourcepack' : 'mod';
+      const { installProjectTo } = await import('./modrinth.js');
+      return installProjectTo(
+        dir,
+        slug,
+        mc,
+        projectType as 'mod' | 'shader' | 'resourcepack',
+        subdir as 'mods' | 'shaderpacks' | 'resourcepacks',
+      );
+    },
+  );
+  ipcMain.handle('datapacks:worlds', async (_e, instanceId?: string) => {
+    if (typeof instanceId !== 'string' || !instanceId) throw new Error('Invalid instanceId');
+    const { getInstance, getInstanceDir } = await import('./launcher/instances.js');
+    const inst = await getInstance(instanceId);
+    if (!inst) throw new Error(`Instance not found: ${instanceId}`);
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const savesDir = path.join(getInstanceDir(instanceId), 'saves');
+    const entries = await fs.readdir(savesDir).catch(() => [] as string[]);
+    const out: Array<{ name: string; packs: string[] }> = [];
+    for (const name of entries) {
+      if (!/^[A-Za-z0-9 _-]+$/.test(name)) continue;
+      const levelDat = path.join(savesDir, name, 'level.dat');
+      const st = await fs.stat(levelDat).catch(() => null);
+      if (!st || !st.isFile()) continue;
+      const packsDir = path.join(savesDir, name, 'datapacks');
+      const packFiles = await fs.readdir(packsDir).catch(() => [] as string[]);
+      const packs = packFiles.filter((f) => f.toLowerCase().endsWith('.zip')).sort();
+      out.push({ name, packs });
+    }
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+  });
+  ipcMain.handle(
+    'datapacks:install-url',
+    async (_e, instanceId?: string, world?: string, url?: string, filename?: string) => {
+      if (typeof instanceId !== 'string' || !instanceId) throw new Error('Invalid instanceId');
+      if (typeof world !== 'string' || !/^[A-Za-z0-9 _-]+$/.test(world)) throw new Error('Invalid world');
+      if (typeof url !== 'string' || !/^https?:\/\//.test(url)) throw new Error('Invalid URL');
+      if (typeof filename !== 'string' || !filename) throw new Error('Invalid filename');
+      const path = await import('node:path');
+      const safe = path.basename(filename).trim();
+      if (!/^[A-Za-z0-9 _.-]+\.zip$/i.test(safe)) throw new Error('Filename must be a safe *.zip name');
+      const { getInstance, getInstanceDir } = await import('./launcher/instances.js');
+      const inst = await getInstance(instanceId);
+      if (!inst) throw new Error(`Instance not found: ${instanceId}`);
+      const { fetchWithRetry } = await import('./net.js');
+      const res = await fetchWithRetry(url, {}, { label: 'Datapack', timeoutMs: 60000, retries: 2 });
+      if (!res.ok || !res.body) throw new Error(`Datapack download failed ${res.status}: ${url}`);
+      const buf = Buffer.from(await res.arrayBuffer());
+      const fs = await import('node:fs/promises');
+      const dest = path.join(getInstanceDir(instanceId), 'saves', world, 'datapacks', safe);
+      await fs.mkdir(path.dirname(dest), { recursive: true });
+      await fs.writeFile(dest, buf);
+      return { file: dest };
+    },
+  );
+  ipcMain.handle('datapacks:import-file', async (_e, instanceId?: string, world?: string) => {
+    if (typeof instanceId !== 'string' || !instanceId) throw new Error('Invalid instanceId');
+    if (typeof world !== 'string' || !/^[A-Za-z0-9 _-]+$/.test(world)) throw new Error('Invalid world');
+    const { getInstance, getInstanceDir } = await import('./launcher/instances.js');
+    const inst = await getInstance(instanceId);
+    if (!inst) throw new Error(`Instance not found: ${instanceId}`);
+    if (!mainWindow) throw new Error('Window not ready');
+    const picked = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [{ name: 'Datapack', extensions: ['zip'] }],
+    });
+    if (picked.canceled || !picked.filePaths[0]) return null;
+    const path = await import('node:path');
+    const fs = await import('node:fs/promises');
+    const src = picked.filePaths[0];
+    const safe = path.basename(src).trim();
+    if (!/^[A-Za-z0-9 _.-]+\.zip$/i.test(safe)) throw new Error('File must be a *.zip datapack');
+    const dest = path.join(getInstanceDir(instanceId), 'saves', world, 'datapacks', safe);
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.copyFile(src, dest);
+    return { file: dest };
+  });
 
   // Network diagnostics
   ipcMain.handle('net:diagnose', async () => {

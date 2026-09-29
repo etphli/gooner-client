@@ -30,6 +30,11 @@ interface GoonerBridge {
   getMods?: (instanceId: string) => Promise<unknown>;
   toggleMod?: (instanceId: string, slug: string, enabled: boolean) => Promise<unknown>;
   removeMod?: (instanceId: string, slug: string) => Promise<unknown>;
+  searchProjects?: (query: string, mcVersion?: string, projectType?: string) => Promise<unknown>;
+  installTo?: (instanceId: string, slug: string, mcVersion?: string, kind?: string) => Promise<unknown>;
+  listWorlds?: (instanceId: string) => Promise<unknown>;
+  installDatapackUrl?: (instanceId: string, world: string, url: string, filename: string) => Promise<unknown>;
+  importDatapackFile?: (instanceId: string, world: string) => Promise<unknown>;
 }
 
 function getBridge(): GoonerBridge | undefined {
@@ -60,6 +65,22 @@ interface InstalledMod {
   enabled: boolean;
   version?: string;
   file?: string;
+}
+
+type ContentTab = 'mods' | 'shaders' | 'packs' | 'datapacks';
+
+interface DpWorld {
+  name: string;
+  packs: string[];
+}
+
+function normalizeDpWorld(raw: unknown): DpWorld | null {
+  const r = asRecord(raw);
+  const name = typeof r.name === 'string' ? r.name : '';
+  if (!name) return null;
+  const packsRaw = Array.isArray(r.packs) ? r.packs : [];
+  const packs = packsRaw.filter((p): p is string => typeof p === 'string');
+  return { name, packs };
 }
 
 type LoaderChoice = 'fabric' | 'vanilla';
@@ -204,6 +225,30 @@ const Mods: React.FC = () => {
   const [modActionError, setModActionError] = useState<string | null>(null);
   const [togglingSlug, setTogglingSlug] = useState<string | null>(null);
   const [removingSlug, setRemovingSlug] = useState<string | null>(null);
+
+  // ADDITIVE — content tabs (Mods / Shaders / Resource Packs / Datapacks).
+  const [contentTab, setContentTab] = useState<ContentTab>('mods');
+
+  // ADDITIVE — extended browser (shaders + resource packs reuse browser+install flow with kind).
+  const [exQuery, setExQuery] = useState('');
+  const [exResults, setExResults] = useState<BrowserMod[]>([]);
+  const [exSearching, setExSearching] = useState(false);
+  const [exSearchError, setExSearchError] = useState<string | null>(null);
+  const [exInstallingSlug, setExInstallingSlug] = useState<string | null>(null);
+  const [exInstallOk, setExInstallOk] = useState<Record<string, boolean>>({});
+  const [exInstallErr, setExInstallErr] = useState<Record<string, string>>({});
+  const [exSelected, setExSelected] = useState<BrowserMod | null>(null);
+
+  // ADDITIVE — datapacks per world.
+  const [dpWorlds, setDpWorlds] = useState<DpWorld[]>([]);
+  const [dpWorldsLoading, setDpWorldsLoading] = useState(false);
+  const [dpWorldsError, setDpWorldsError] = useState<string | null>(null);
+  const [dpSelectedWorld, setDpSelectedWorld] = useState<string>('');
+  const [dpUrl, setDpUrl] = useState('');
+  const [dpFilename, setDpFilename] = useState('');
+  const [dpBusy, setDpBusy] = useState<'url' | 'file' | null>(null);
+  const [dpError, setDpError] = useState<string | null>(null);
+  const [dpOk, setDpOk] = useState<string | null>(null);
 
   const active = useMemo(() => profiles.find((p) => p.id === activeId) ?? null, [profiles, activeId]);
 
@@ -425,6 +470,144 @@ const Mods: React.FC = () => {
     }
   };
 
+  // ADDITIVE — extended search (shaders / resource packs) reusing browser+install flow with kind.
+  const runSearchEx = useCallback(
+    async (q: string, mcVersion: string, projectType: 'shader' | 'resourcepack') => {
+      if (!activeId) {
+        setExResults([]);
+        return;
+      }
+      setExSearching(true);
+      setExSearchError(null);
+      try {
+        const raw = await getBridge()?.searchProjects?.(q, mcVersion, projectType);
+        const list = Array.isArray(raw)
+          ? (raw as unknown[]).map(normalizeBrowserMod).filter((m): m is BrowserMod => m !== null)
+          : [];
+        setExResults(list);
+      } catch (e) {
+        setExResults([]);
+        setExSearchError(withProxyHint(errMsg(e, `${projectType} search failed.`)));
+      } finally {
+        setExSearching(false);
+      }
+    },
+    [activeId],
+  );
+
+  const handleInstallTo = async (slug: string, kind: 'shader' | 'resourcepack'): Promise<void> => {
+    if (!activeId) return;
+    const mc = active?.mcVersion ?? '';
+    setExInstallingSlug(slug);
+    setExInstallErr((prev) => {
+      const next = { ...prev };
+      delete next[slug];
+      return next;
+    });
+    try {
+      await getBridge()?.installTo?.(activeId, slug, mc, kind);
+      setExInstallOk((prev) => ({ ...prev, [slug]: true }));
+    } catch (e) {
+      setExInstallErr((prev) => ({ ...prev, [slug]: withProxyHint(errMsg(e, `Failed to install ${slug}.`)) }));
+    } finally {
+      setExInstallingSlug(null);
+    }
+  };
+
+  // ADDITIVE — datapack worlds (listWorlds returns [{name, packs}]).
+  const refreshWorlds = useCallback(async (instanceId: string) => {
+    if (!instanceId) return;
+    setDpWorldsLoading(true);
+    setDpWorldsError(null);
+    try {
+      const raw = await getBridge()?.listWorlds?.(instanceId);
+      const list = Array.isArray(raw)
+        ? (raw as unknown[]).map(normalizeDpWorld).filter((w): w is DpWorld => w !== null)
+        : [];
+      setDpWorlds(list);
+      setDpSelectedWorld((prev) => {
+        if (prev && list.some((w) => w.name === prev)) return prev;
+        return list[0]?.name ?? '';
+      });
+    } catch (e) {
+      setDpWorlds([]);
+      setDpWorldsError(withProxyHint(errMsg(e, 'Failed to load worlds.')));
+    } finally {
+      setDpWorldsLoading(false);
+    }
+  }, []);
+
+  const handleDpUrlInstall = async (): Promise<void> => {
+    if (!activeId || !dpSelectedWorld) return;
+    setDpError(null);
+    setDpOk(null);
+    const url = dpUrl.trim();
+    const filename = dpFilename.trim() || url.split('/').pop()?.split('?')[0] || 'datapack.zip';
+    if (!url) {
+      setDpError('Enter a datapack URL first.');
+      return;
+    }
+    setDpBusy('url');
+    try {
+      await getBridge()?.installDatapackUrl?.(activeId, dpSelectedWorld, url, filename);
+      setDpOk(`Installed ${filename} into ${dpSelectedWorld}/datapacks.`);
+      setDpUrl('');
+      setDpFilename('');
+      await refreshWorlds(activeId);
+    } catch (e) {
+      setDpError(withProxyHint(errMsg(e, 'Datapack URL install failed.')));
+    } finally {
+      setDpBusy(null);
+    }
+  };
+
+  const handleDpImport = async (): Promise<void> => {
+    if (!activeId || !dpSelectedWorld) return;
+    setDpError(null);
+    setDpOk(null);
+    setDpBusy('file');
+    try {
+      const res = await getBridge()?.importDatapackFile?.(activeId, dpSelectedWorld);
+      const file = typeof res === 'object' && res !== null ? (asRecord(res).file as string | undefined) : undefined;
+      if (!file) {
+        setDpOk(null);
+        return;
+      }
+      setDpOk(`Imported ${String(file).split('/').pop() ?? 'datapack.zip'} into ${dpSelectedWorld}/datapacks.`);
+      await refreshWorlds(activeId);
+    } catch (e) {
+      setDpError(withProxyHint(errMsg(e, 'Datapack file import failed.')));
+    } finally {
+      setDpBusy(null);
+    }
+  };
+
+  useEffect(() => {
+    if (contentTab !== 'datapacks' || !activeId) return;
+    void refreshWorlds(activeId);
+  }, [contentTab, activeId, refreshWorlds]);
+
+  useEffect(() => {
+    if (contentTab !== 'shaders' && contentTab !== 'packs') return;
+    if (!activeId) return;
+    const projectType = contentTab === 'shaders' ? 'shader' : 'resourcepack';
+    const mc = active?.mcVersion ?? '';
+    const t = window.setTimeout(() => {
+      void runSearchEx(exQuery.trim(), mc, projectType);
+    }, 350);
+    return () => window.clearTimeout(t);
+  }, [exQuery, active?.mcVersion, activeId, contentTab, runSearchEx]);
+
+  // Close extended detail modal on Esc.
+  useEffect(() => {
+    if (!exSelected) return undefined;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setExSelected(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [exSelected]);
+
   return (
     <div style={{ maxWidth: 880, display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
@@ -587,6 +770,58 @@ const Mods: React.FC = () => {
         </form>
       </Card>
 
+      {/* ADDITIVE — content tabs: Mods / Shaders / Resource Packs / Datapacks */}
+      <Card>
+        <div style={{ ...rowBetween, marginBottom: 4 }}>
+          <h3 style={{ margin: 0, fontSize: 14 }}>Content</h3>
+          <span style={{ fontSize: 12, ...muted }}>
+            {active ? (
+              <>
+                for <strong style={{ color: 'var(--text)' }}>{active.name}</strong> ({active.mcVersion || 'unknown version'})
+              </>
+            ) : (
+              'select a profile first'
+            )}
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} role="tablist" aria-label="Content type">
+          {(
+            [
+              { v: 'mods', label: 'Mods' },
+              { v: 'shaders', label: 'Shaders' },
+              { v: 'packs', label: 'Resource Packs' },
+              { v: 'datapacks', label: 'Datapacks' },
+            ] as Array<{ v: ContentTab; label: string }>
+          ).map((t) => (
+            <button
+              key={t.v}
+              type="button"
+              role="tab"
+              aria-selected={contentTab === t.v}
+              onClick={() => setContentTab(t.v)}
+              className="btn-ghost"
+              style={{
+                background: contentTab === t.v ? 'var(--text)' : undefined,
+                color: contentTab === t.v ? 'var(--bg)' : undefined,
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        {contentTab === 'shaders' ? (
+          <p style={{ fontSize: 12, ...muted, margin: '8px 0 0' }}>Shader packs install into shaderpacks/ (Iris / Sodium compatible).</p>
+        ) : null}
+        {contentTab === 'packs' ? (
+          <p style={{ fontSize: 12, ...muted, margin: '8px 0 0' }}>Resource packs install into resourcepacks/.</p>
+        ) : null}
+        {contentTab === 'datapacks' ? (
+          <p style={{ fontSize: 12, ...muted, margin: '8px 0 0' }}>Datapacks install into saves/&lt;world&gt;/datapacks/ per world.</p>
+        ) : null}
+      </Card>
+
+      {contentTab === 'mods' ? (
+      <>
       {/* 2 — Mod browser */}
       <Card>
         <div style={{ ...rowBetween, marginBottom: 4 }}>
@@ -793,6 +1028,293 @@ const Mods: React.FC = () => {
           </div>
         )}
       </Card>
+      </>
+      ) : null}
+
+      {/* ADDITIVE — Shaders browser (kind=shader → shaderpacks/) */}
+      {contentTab === 'shaders' ? (
+      <Card>
+        <div style={{ ...rowBetween, marginBottom: 4 }}>
+          <h3 style={{ margin: 0, fontSize: 14 }}>Shader browser</h3>
+          <span style={{ fontSize: 12, ...muted }}>
+            {active ? (
+              <>
+                for <strong style={{ color: 'var(--text)' }}>{active.name}</strong> ({active.mcVersion || 'unknown version'})
+              </>
+            ) : (
+              'select a profile first'
+            )}
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <input
+            className="input"
+            placeholder={active ? `🔍  Search shaders for ${active.mcVersion || 'your version'}…` : '🔍  Select a profile to browse…'}
+            value={exQuery}
+            disabled={!active}
+            onChange={(e) => setExQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void runSearchEx(exQuery.trim(), active?.mcVersion ?? '', 'shader');
+              }
+            }}
+            style={{ flex: 1, minWidth: 200 }}
+            aria-label="Search shaders"
+          />
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={!active || exSearching}
+            onClick={() => void runSearchEx(exQuery.trim(), active?.mcVersion ?? '', 'shader')}
+          >
+            Search
+          </button>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          {!active ? (
+            <p style={{ ...muted, fontSize: 13, margin: 0 }}>No active profile — pick one above to browse shaders.</p>
+          ) : exSearching ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }} aria-label="Searching shaders">
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <SkeletonCard key={i} />
+              ))}
+            </div>
+          ) : exSearchError ? (
+            <div style={errBox}>
+              <p style={{ margin: '0 0 8px', fontSize: 13 }}>⚠ {exSearchError}</p>
+              <button type="button" className="btn-ghost" onClick={() => void runSearchEx(exQuery.trim(), active.mcVersion ?? '', 'shader')}>
+                Retry
+              </button>
+            </div>
+          ) : exResults.length === 0 ? (
+            <p style={{ ...muted, fontSize: 13, margin: 0 }}>
+              {exQuery ? `No results for “${exQuery}”.` : 'Type to search — e.g. complementary, bsl, seus.'}
+            </p>
+          ) : (
+            <>
+              <p style={{ fontSize: 12, ...muted, margin: '0 0 8px' }}>{exResults.length} result{exResults.length === 1 ? '' : 's'} • installs to shaderpacks/</p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
+                {exResults.map((m) => (
+                  <ModCard
+                    key={m.slug}
+                    mod={m}
+                    installing={exInstallingSlug === m.slug}
+                    installed={!!exInstallOk[m.slug]}
+                    installError={exInstallErr[m.slug] ?? null}
+                    onInstall={(s) => void handleInstallTo(s, 'shader')}
+                    onSelect={(sel) => setExSelected({ slug: sel.slug, title: sel.title, description: sel.description, iconUrl: sel.iconUrl, downloads: sel.downloads, clientSide: sel.clientSide })}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </Card>
+      ) : null}
+
+      {/* ADDITIVE — Resource Packs browser (kind=resourcepack → resourcepacks/) */}
+      {contentTab === 'packs' ? (
+      <Card>
+        <div style={{ ...rowBetween, marginBottom: 4 }}>
+          <h3 style={{ margin: 0, fontSize: 14 }}>Resource pack browser</h3>
+          <span style={{ fontSize: 12, ...muted }}>
+            {active ? (
+              <>
+                for <strong style={{ color: 'var(--text)' }}>{active.name}</strong> ({active.mcVersion || 'unknown version'})
+              </>
+            ) : (
+              'select a profile first'
+            )}
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <input
+            className="input"
+            placeholder={active ? `🔍  Search resource packs for ${active.mcVersion || 'your version'}…` : '🔍  Select a profile to browse…'}
+            value={exQuery}
+            disabled={!active}
+            onChange={(e) => setExQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void runSearchEx(exQuery.trim(), active?.mcVersion ?? '', 'resourcepack');
+              }
+            }}
+            style={{ flex: 1, minWidth: 200 }}
+            aria-label="Search resource packs"
+          />
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={!active || exSearching}
+            onClick={() => void runSearchEx(exQuery.trim(), active?.mcVersion ?? '', 'resourcepack')}
+          >
+            Search
+          </button>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          {!active ? (
+            <p style={{ ...muted, fontSize: 13, margin: 0 }}>No active profile — pick one above to browse packs.</p>
+          ) : exSearching ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }} aria-label="Searching resource packs">
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <SkeletonCard key={i} />
+              ))}
+            </div>
+          ) : exSearchError ? (
+            <div style={errBox}>
+              <p style={{ margin: '0 0 8px', fontSize: 13 }}>⚠ {exSearchError}</p>
+              <button type="button" className="btn-ghost" onClick={() => void runSearchEx(exQuery.trim(), active.mcVersion ?? '', 'resourcepack')}>
+                Retry
+              </button>
+            </div>
+          ) : exResults.length === 0 ? (
+            <p style={{ ...muted, fontSize: 13, margin: 0 }}>
+              {exQuery ? `No results for “${exQuery}”.` : 'Type to search — e.g. faithful, fresh animations, vanilla tweaks.'}
+            </p>
+          ) : (
+            <>
+              <p style={{ fontSize: 12, ...muted, margin: '0 0 8px' }}>{exResults.length} result{exResults.length === 1 ? '' : 's'} • installs to resourcepacks/</p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
+                {exResults.map((m) => (
+                  <ModCard
+                    key={m.slug}
+                    mod={m}
+                    installing={exInstallingSlug === m.slug}
+                    installed={!!exInstallOk[m.slug]}
+                    installError={exInstallErr[m.slug] ?? null}
+                    onInstall={(s) => void handleInstallTo(s, 'resourcepack')}
+                    onSelect={(sel) => setExSelected({ slug: sel.slug, title: sel.title, description: sel.description, iconUrl: sel.iconUrl, downloads: sel.downloads, clientSide: sel.clientSide })}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </Card>
+      ) : null}
+
+      {/* ADDITIVE — Datapacks per world */}
+      {contentTab === 'datapacks' ? (
+      <Card>
+        <div style={{ ...rowBetween, marginBottom: 4 }}>
+          <h3 style={{ margin: 0, fontSize: 14 }}>Datapacks</h3>
+          <span style={{ fontSize: 12, ...muted }}>
+            {active ? (
+              <>
+                for <strong style={{ color: 'var(--text)' }}>{active.name}</strong>
+              </>
+            ) : (
+              'select a profile first'
+            )}
+          </span>
+          {active ? (
+            <span style={{ marginLeft: 'auto' }}>
+              <button type="button" className="btn-ghost" disabled={dpWorldsLoading} onClick={() => void refreshWorlds(active.id)}>
+                ↻ Refresh worlds
+              </button>
+            </span>
+          ) : null}
+        </div>
+        {!active ? (
+          <p style={{ ...muted, fontSize: 13, margin: 0 }}>Select a profile to manage datapacks.</p>
+        ) : dpWorldsLoading ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} aria-label="Loading worlds">
+            <span className="spinner" aria-hidden="true" />
+            <span style={{ fontSize: 13, ...muted }}>Loading worlds…</span>
+          </div>
+        ) : dpWorldsError ? (
+          <div style={errBox}>
+            <p style={{ margin: '0 0 8px', fontSize: 13 }}>⚠ {dpWorldsError}</p>
+            <button type="button" className="btn-ghost" onClick={() => void refreshWorlds(active.id)}>
+              Retry
+            </button>
+          </div>
+        ) : dpWorlds.length === 0 ? (
+          <p style={{ ...muted, fontSize: 13, margin: 0 }}>No worlds yet — launch the game once to create a world (saves/*/level.dat).</p>
+        ) : (
+          <>
+            <label style={{ fontSize: 12, ...muted }}>
+              World
+              <select className="select" value={dpSelectedWorld} onChange={(e) => setDpSelectedWorld(e.target.value)} aria-label="Select world">
+                {dpWorlds.map((w) => (
+                  <option key={w.name} value={w.name}>
+                    {w.name} ({w.packs.length} pack{w.packs.length === 1 ? '' : 's'})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+              <label style={{ fontSize: 12, ...muted }}>
+                Datapack URL
+                <input
+                  className="input"
+                  value={dpUrl}
+                  onChange={(e) => setDpUrl(e.target.value)}
+                  placeholder="https://example.com/datapack.zip"
+                  aria-label="Datapack URL"
+                />
+              </label>
+              <label style={{ fontSize: 12, ...muted }}>
+                Filename (*.zip)
+                <input
+                  className="input"
+                  value={dpFilename}
+                  onChange={(e) => setDpFilename(e.target.value)}
+                  placeholder="my-pack.zip"
+                  maxLength={128}
+                  aria-label="Datapack filename"
+                />
+              </label>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={!dpSelectedWorld || dpBusy !== null}
+                onClick={() => void handleDpUrlInstall()}
+                style={{ fontSize: 12 }}
+              >
+                {dpBusy === 'url' ? 'Downloading…' : 'Install from URL'}
+              </button>
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={!dpSelectedWorld || dpBusy !== null}
+                onClick={() => void handleDpImport()}
+                style={{ fontSize: 12 }}
+              >
+                {dpBusy === 'file' ? 'Importing…' : 'Import .zip file…'}
+              </button>
+            </div>
+            {dpError ? <p style={{ fontSize: 12, margin: '8px 0 0', color: 'var(--red)' }}>⚠ {dpError}</p> : null}
+            {dpOk ? <p style={{ fontSize: 12, margin: '8px 0 0', color: 'var(--green)', fontWeight: 700 }}>✓ {dpOk}</p> : null}
+            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {dpWorlds.map((w) => (
+                <div key={w.name} style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: 'var(--card-2)', padding: '10px 12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <strong style={{ fontSize: 13, color: 'var(--text)' }}>{w.name}</strong>
+                    <span className="mono" style={{ fontSize: 11, ...muted }}>
+                      saves/{w.name}/datapacks/ • {w.packs.length} zip{w.packs.length === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                  {w.packs.length === 0 ? (
+                    <p style={{ fontSize: 12, ...muted, margin: '6px 0 0' }}>No datapacks installed in this world yet.</p>
+                  ) : (
+                    <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12, color: 'var(--text)' }}>
+                      {w.packs.map((p) => (
+                        <li key={p} className="mono">{p}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </Card>
+      ) : null}
 
       {/* 4 — Detail modal */}
       {selected ? (
@@ -881,6 +1403,90 @@ const Mods: React.FC = () => {
                 onClick={() => void handleInstall(selected.slug)}
               >
                 {installingSlug === selected.slug ? 'Installing…' : 'Install'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ADDITIVE — extended detail modal (shaders / packs) */}
+      {exSelected ? (
+        <div
+          role="presentation"
+          onClick={() => setExSelected(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 100, display: 'grid', placeItems: 'center', padding: 16 }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={exSelected.title}
+            onClick={(e) => e.stopPropagation()}
+            className="card"
+            style={{ maxWidth: 520, width: '100%', maxHeight: '85vh', overflowY: 'auto', background: 'var(--card)', padding: 20 }}
+          >
+            <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+              {exSelected.iconUrl ? (
+                <img
+                  src={exSelected.iconUrl}
+                  alt=""
+                  width={64}
+                  height={64}
+                  style={{ width: 64, height: 64, borderRadius: 14, objectFit: 'cover', flexShrink: 0, border: '1px solid var(--border)' }}
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+              ) : (
+                <div
+                  aria-hidden
+                  style={{
+                    width: 64,
+                    height: 64,
+                    borderRadius: 14,
+                    flexShrink: 0,
+                    display: 'grid',
+                    placeItems: 'center',
+                    fontWeight: 700,
+                    fontSize: 28,
+                    color: 'var(--text)',
+                    background: 'var(--card-2)',
+                    border: '1px solid var(--border)',
+                  }}
+                >
+                  {(exSelected.title || exSelected.slug || '?').slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <h3 style={{ margin: 0, fontSize: 17, color: 'var(--text)' }}>{exSelected.title}</h3>
+                <p className="mono" style={{ margin: '2px 0 0', fontSize: 11, ...muted }}>{exSelected.slug}</p>
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span className="mono" style={{ fontSize: 12, color: 'var(--text2)' }}>⬇ {formatDownloads(exSelected.downloads)}</span>
+                </div>
+              </div>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--text)', margin: '14px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {exSelected.description || 'No description available.'}
+            </p>
+            <p style={{ fontSize: 12, ...muted, margin: '12px 0 0' }}>
+              Installs into {contentTab === 'packs' ? 'resourcepacks/' : 'shaderpacks/'} for {active ? `“${active.name}” (${active.mcVersion || 'unknown MC version'})` : 'the active profile’s MC version'}.
+            </p>
+            {exInstallErr[exSelected.slug] ? (
+              <p style={{ fontSize: 12, margin: '8px 0 0', color: 'var(--red)' }}>⚠ {exInstallErr[exSelected.slug]}</p>
+            ) : null}
+            {exInstallOk[exSelected.slug] ? (
+              <p style={{ fontSize: 12, margin: '8px 0 0', color: 'var(--green)', fontWeight: 700 }}>✓ Installed</p>
+            ) : null}
+            <div style={{ display: 'flex', gap: 8, marginTop: 14, justifyContent: 'flex-end' }}>
+              <button type="button" className="btn-ghost" onClick={() => setExSelected(null)}>
+                Close
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={!active || exInstallingSlug === exSelected.slug}
+                onClick={() => void handleInstallTo(exSelected.slug, contentTab === 'packs' ? 'resourcepack' : 'shader')}
+              >
+                {exInstallingSlug === exSelected.slug ? 'Installing…' : 'Install'}
               </button>
             </div>
           </div>
