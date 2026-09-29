@@ -3,6 +3,10 @@ All notable changes documented. Format based on Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-09-29
+### Fixed
+- In-app updates: publish .blockmap files so differential download stops 404ing ("Cannot download").
+
 ## [0.3.7] - 2026-09-29
 ### Fixed
 - In-app updates install: ad-hoc seal so Squirrel accepts the bundle (was "code signature did not pass validation").

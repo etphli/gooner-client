@@ -32,6 +32,7 @@ jobs:
           files: |
             release/*.dmg
             release/*.zip
+            release/*.blockmap
             release/latest-mac.yml
             release/SHA256SUMS.txt
           generate_release_notes: true
