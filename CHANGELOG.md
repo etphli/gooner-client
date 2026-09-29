@@ -3,6 +3,10 @@ All notable changes documented. Format based on Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-09-29
+### Added
+- Signature-failure guidance in the update banner (manual DMG once → automatic after).
+
 ## [0.3.9] - 2026-09-29
 ### Added
 - Update errors: one-click Copy error + Download DMG fallback; errors logged to updater.log.

@@ -287,11 +287,16 @@ export default function UpdateBanner() {
           <span aria-hidden="true" style={{ color: 'var(--red)', fontWeight: 700 }}>!</span>
           <span
             className="mono tiny"
-            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 420 }}
+            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 380 }}
             title={message}
           >
             Update error: {message || 'Unknown error'}
           </span>
+          {/code signature/i.test(message || '') && (
+            <span className="tiny muted" style={{ whiteSpace: 'nowrap' }}>
+              Pre-v0.3.7 install? Grab the DMG once manually — updates go automatic after that.
+            </span>
+          )}
           <button
             type="button"
             className="btn-ghost btn-sm"
