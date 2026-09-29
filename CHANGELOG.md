@@ -3,6 +3,10 @@ All notable changes documented. Format based on Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-09-29
+### Fixed
+- In-app updates install: ad-hoc seal so Squirrel accepts the bundle (was "code signature did not pass validation").
+
 ## [0.3.6] - 2026-09-29
 ### Fixed
 - In-app updates really work now: mac .zip published (previous fix never took effect — build script overrode it).
