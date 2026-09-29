@@ -3,6 +3,10 @@ All notable changes documented. Format based on Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-09-29
+### Fixed
+- In-app updates on macOS: publish the .zip Squirrel.Mac actually installs from (no more "ZIP file not provided").
+
 ## [0.3.4] - 2026-09-28
 ### Added
 - Cosmetics: skin viewer (see items on your skin) + 63-item catalog.

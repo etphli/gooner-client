@@ -6,6 +6,7 @@
 
 - `Gooner-Client-<version>-mac-arm64.dmg` — Apple Silicon, **default**
 - `Gooner-Client-<version>-mac-x64.dmg` — Intel only
+- `Gooner-Client-<version>-mac-arm64.zip` / `-x64.zip` — used by in-app updates (ignore for manual install)
 - `SHA256SUMS.txt` — verify: `shasum -a 256 -c SHA256SUMS.txt`
 
 ## First launch — one-time Terminal fix
