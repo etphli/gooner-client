@@ -478,7 +478,19 @@ function wireAutoUpdater(): void {
       /* dock badge best-effort */
     }
   });
-  autoUpdater.on('error', (e) => send('updater:error', String(e)));
+  autoUpdater.on('error', (e) => {
+    send('updater:error', String(e));
+    void (async () => {
+      try {
+        const fs = await import('node:fs/promises');
+        const path = await import('node:path');
+        const line = `[${new Date().toISOString()}] v${app.getVersion()} updater error: ${String(e && (e as Error).stack || e)}\n`;
+        await fs.appendFile(path.join(app.getPath('userData'), 'updater.log'), line, 'utf-8');
+      } catch {
+        /* logging best-effort */
+      }
+    })();
+  });
 }
 
 function clearDockBadge(): void {

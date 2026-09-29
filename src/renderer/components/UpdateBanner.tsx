@@ -287,11 +287,35 @@ export default function UpdateBanner() {
           <span aria-hidden="true" style={{ color: 'var(--red)', fontWeight: 700 }}>!</span>
           <span
             className="mono tiny"
-            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 560 }}
+            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 420 }}
             title={message}
           >
             Update error: {message || 'Unknown error'}
           </span>
+          <button
+            type="button"
+            className="btn-ghost btn-sm"
+            onClick={() => {
+              try {
+                void navigator.clipboard?.writeText(`Gooner Client update error:\n${message || 'Unknown error'}`);
+              } catch {
+                /* ignore */
+              }
+            }}
+          >
+            Copy error
+          </button>
+          <button
+            type="button"
+            className="btn-ghost btn-sm"
+            onClick={() => {
+              (window.gooner as unknown as { openExternal?: (u: string) => Promise<void> } | undefined)?.openExternal?.(
+                'https://github.com/etphli/gooner-client/releases/latest',
+              )?.catch(() => undefined);
+            }}
+          >
+            Download DMG
+          </button>
         </>
       ) : (
         <>

@@ -3,6 +3,10 @@ All notable changes documented. Format based on Keep a Changelog, SemVer.
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-09-29
+### Added
+- Update errors: one-click Copy error + Download DMG fallback; errors logged to updater.log.
+
 ## [0.3.8] - 2026-09-29
 ### Fixed
 - In-app updates: publish .blockmap files so differential download stops 404ing ("Cannot download").
